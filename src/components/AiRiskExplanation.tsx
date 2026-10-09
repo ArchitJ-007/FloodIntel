@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Incident } from '@/context/IncidentContext';
 
 // ==============================================================================
@@ -45,48 +45,104 @@ export function AiRiskExplanation({
   const [data, setData] = useState<ExplanationData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
-  const fetchExplanation = useCallback(async () => {
+  // Client-side component memoization cache (PRD F-13)
+  const explanationCacheRef = useRef<Map<string, ExplanationData>>(new Map());
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Derive stable primitive cache key
+  const incidentId = incident?.id;
+  const incidentSeverity = incident?.severity;
+  const incidentDepth = incident?.depth;
+  const severityScore = scoreBreakdown?.severityScore;
+  const rainScore = scoreBreakdown?.rainScore;
+  const rainRiskIndex = weatherSnapshot?.rainRiskIndex;
+
+  const primitiveKey = `${incidentId}:${calculatedRiskScore}:${severityScore}:${rainScore}:${rainRiskIndex}`;
+
+  useEffect(() => {
+    if (!incidentId) return;
+
+    // Check client memoization cache
+    const cached = explanationCacheRef.current.get(primitiveKey);
+    if (cached) {
+      setData(cached);
+      setIsLoading(false);
+      setError(null);
+      return;
+    }
+
+    // Abort previous in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsLoading(true);
     setError(null);
 
-    try {
-      const response = await fetch('/api/ai/explain', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          incidentId: incident.id,
-          title: incident.title,
-          location: incident.location,
-          severity: incident.severity,
-          depth: incident.depth,
-          isDemo: incident.provenance === 'demo',
-          isVerified: incident.verificationStatus === 'verified',
-          reportCount: incident.corroborationCount || 1,
-          reportedAt: incident.reportedTime,
-          riskScore: calculatedRiskScore,
-          scoreBreakdown,
-          weatherSnapshot,
-        }),
-      });
+    async function executeFetch() {
+      try {
+        const response = await fetch('/api/ai/explain', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            incidentId,
+            title: incident.title,
+            location: incident.location,
+            severity: incidentSeverity,
+            depth: incidentDepth,
+            isDemo: incident.provenance === 'demo',
+            isVerified: incident.verificationStatus === 'verified',
+            reportCount: incident.corroborationCount || 1,
+            reportedAt: incident.reportedTime,
+            riskScore: calculatedRiskScore,
+            scoreBreakdown,
+            weatherSnapshot,
+          }),
+        });
 
-      if (!response.ok) {
-        throw new Error(`Server returned HTTP ${response.status}`);
+        if (!response.ok) {
+          throw new Error(`Server returned HTTP ${response.status}`);
+        }
+
+        const json = await response.json();
+        if (abortControllerRef.current === controller) {
+          explanationCacheRef.current.set(primitiveKey, json);
+          setData(json);
+        }
+      } catch (err: any) {
+        if (err.name === 'AbortError') return;
+        console.warn('Failed to fetch AI explanation, using local fallback:', err);
+        if (abortControllerRef.current === controller) {
+          setError('Live advisory generation temporarily unavailable.');
+        }
+      } finally {
+        if (abortControllerRef.current === controller) {
+          setIsLoading(false);
+        }
       }
-
-      const json = await response.json();
-      setData(json);
-    } catch (err: any) {
-      console.warn('Failed to fetch AI explanation, using local fallback:', err);
-      setError('Live advisory generation temporarily unavailable.');
-    } finally {
-      setIsLoading(false);
     }
-  }, [incident, calculatedRiskScore, scoreBreakdown, weatherSnapshot]);
 
-  useEffect(() => {
-    fetchExplanation();
-  }, [fetchExplanation]);
+    executeFetch();
+
+    return () => {
+      controller.abort();
+    };
+  }, [
+    incidentId,
+    incidentSeverity,
+    incidentDepth,
+    calculatedRiskScore,
+    severityScore,
+    rainScore,
+    rainRiskIndex,
+    primitiveKey,
+    retryCount,
+  ]);
 
   return (
     <div className="bg-surface-container rounded-xl border border-secondary-container/40 p-4 relative overflow-hidden shadow-sm space-y-3">
@@ -141,7 +197,10 @@ export function AiRiskExplanation({
         <div className="p-2.5 rounded bg-error/15 border border-error/30 text-xs text-error flex items-center justify-between">
           <span>{error}</span>
           <button
-            onClick={fetchExplanation}
+            onClick={() => {
+              explanationCacheRef.current.delete(primitiveKey);
+              setRetryCount((c) => c + 1);
+            }}
             className="text-[11px] font-semibold underline hover:text-white"
           >
             Retry

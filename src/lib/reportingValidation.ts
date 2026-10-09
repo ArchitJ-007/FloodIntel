@@ -214,7 +214,7 @@ export function validateHazardReport(input: HazardReportInput): ValidationResult
       description: trimmedDesc,
       reporterMode: input.reporterMode === 'notify' ? 'notify' : 'anonymous',
       contact,
-      coordinates: resolvedCoords,
+      coordinates: resolvedCoords!,
     };
   }
 
