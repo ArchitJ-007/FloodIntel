@@ -310,7 +310,7 @@ export default function OfficialsDashboardPage() {
                   </span>
                   <p className="text-xs text-on-surface">
                     <span className="font-semibold text-primary">Status Pipeline:</span> Reported →
-                    Under Review → In Progress → Resolved. All records represent live civilian submissions.
+                    Under Review → In Progress → Resolved. All seeded records represent demo test data with [DEMO DATA] provenance labels.
                   </p>
                 </div>
                 <span className="text-[10px] font-mono text-on-surface-variant bg-surface-container px-2 py-0.5 rounded border border-outline-variant shrink-0 hidden sm:inline">
@@ -455,6 +455,7 @@ export default function OfficialsDashboardPage() {
                       <th className="py-3 px-4">Location</th>
                       <th className="py-3 px-4">Hazard Type</th>
                       <th className="py-3 px-4">Severity</th>
+                      <th className="py-3 px-4">Risk Score</th>
                       <th className="py-3 px-4">Reported Time</th>
                       <th className="py-3 px-4">Current Status</th>
                       <th className="py-3 px-4 text-right">Actions</th>
@@ -473,7 +474,12 @@ export default function OfficialsDashboardPage() {
                           }`}
                         >
                           <td className="py-3.5 px-4 font-mono font-semibold text-primary">
-                            {incident.id}
+                            <div>{incident.id}</div>
+                            {incident.provenance === 'demo' && (
+                              <span className="text-[9px] uppercase px-1 py-0.2 rounded bg-surface-container text-secondary border border-outline-variant inline-block mt-0.5">
+                                Demo
+                              </span>
+                            )}
                           </td>
                           <td className="py-3.5 px-4 font-medium text-on-surface">
                             <div className="line-clamp-1">{incident.title}</div>
@@ -484,6 +490,22 @@ export default function OfficialsDashboardPage() {
                           </td>
                           <td className="py-3.5 px-4">
                             <SeverityBadge severity={incident.severity} />
+                          </td>
+                          <td className="py-3.5 px-4 font-mono font-bold">
+                            <span
+                              className={
+                                incident.riskCategory === 'high'
+                                  ? 'text-error'
+                                  : incident.riskCategory === 'moderate'
+                                  ? 'text-amber-400'
+                                  : 'text-primary'
+                              }
+                            >
+                              {incident.riskScore !== null ? `${incident.riskScore}/100` : 'N/A'}
+                            </span>
+                            <span className="text-[10px] text-outline block font-sans font-normal uppercase">
+                              {incident.confidence} conf
+                            </span>
                           </td>
                           <td className="py-3.5 px-4 text-on-surface-variant font-mono">
                             {incident.reportedTime}
@@ -568,6 +590,53 @@ export default function OfficialsDashboardPage() {
                   >
                     <span className="material-symbols-outlined text-base">close</span>
                   </button>
+                </div>
+
+                {/* Deterministic Risk Score Assessment Card */}
+                <div className="bg-surface-container rounded-lg p-3 border border-outline-variant space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-semibold text-on-surface-variant uppercase tracking-wider">
+                      Deterministic Risk Engine
+                    </span>
+                    <span className="text-[10px] font-mono text-outline">
+                      Confidence:{' '}
+                      <strong className="text-on-surface uppercase">
+                        {selectedIncident.confidence}
+                      </strong>
+                    </span>
+                  </div>
+                  <div className="flex items-baseline justify-between">
+                    <div className="flex items-baseline gap-1">
+                      <span
+                        className={`text-2xl font-bold font-mono ${
+                          selectedIncident.riskCategory === 'high'
+                            ? 'text-error'
+                            : selectedIncident.riskCategory === 'moderate'
+                            ? 'text-amber-400'
+                            : 'text-primary'
+                        }`}
+                      >
+                        {selectedIncident.riskScore !== null ? `${selectedIncident.riskScore}` : 'N/A'}
+                      </span>
+                      <span className="text-xs text-outline font-mono">/ 100</span>
+                    </div>
+                    <span className="text-[10px] px-2 py-0.5 rounded border border-outline-variant font-mono uppercase bg-surface-container-high text-on-surface">
+                      {selectedIncident.riskCategory} Risk ({selectedIncident.provenance})
+                    </span>
+                  </div>
+                  {selectedIncident.scoreBreakdown && (
+                    <div className="grid grid-cols-2 gap-1 text-[10px] font-mono text-on-surface-variant pt-1 border-t border-outline-variant/40">
+                      <div>Severity (S): {selectedIncident.scoreBreakdown.severity.contribution} pts</div>
+                      <div>Recency (T): {selectedIncident.scoreBreakdown.recency.contribution} pts</div>
+                      <div>Corroboration (C): {selectedIncident.scoreBreakdown.corroboration.contribution} pts</div>
+                      <div>
+                        Rain (R):{' '}
+                        {selectedIncident.scoreBreakdown.rain.available
+                          ? `${selectedIncident.scoreBreakdown.rain.contribution} pts`
+                          : 'Renorm'}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Citizen Description Card */}

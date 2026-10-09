@@ -318,14 +318,116 @@ export default function RiskMapPage() {
                 {/* Card Header & ID */}
                 <div className="flex items-start justify-between border-b border-outline-variant/60 pb-3">
                   <div>
-                    <span className="font-mono text-xs font-semibold text-primary">
-                      Report ID {selectedIncident.id}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-xs font-semibold text-primary">
+                        Report ID {selectedIncident.id}
+                      </span>
+                      {selectedIncident.provenance === 'demo' ? (
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-mono uppercase bg-surface-container-highest text-secondary border border-outline-variant">
+                          Demo Data
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-mono uppercase bg-primary-container/40 text-primary border border-primary/30">
+                          Citizen Report
+                        </span>
+                      )}
+                    </div>
                     <h3 className="font-display font-semibold text-sm text-on-surface mt-0.5">
                       {selectedIncident.title}
                     </h3>
                   </div>
                   <SeverityBadge severity={selectedIncident.severity} />
+                </div>
+
+                {/* Deterministic Risk Engine Score Card */}
+                <div className="bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/60 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-outline uppercase font-semibold tracking-wider">
+                      Deterministic Risk Score
+                    </span>
+                    <span className="text-[10px] font-mono text-on-surface-variant">
+                      Confidence:{' '}
+                      <strong className="text-on-surface uppercase">
+                        {selectedIncident.confidence}
+                      </strong>
+                    </span>
+                  </div>
+                  <div className="flex items-baseline justify-between">
+                    <div className="flex items-baseline gap-1.5">
+                      <span
+                        className={`text-2xl font-display font-bold tabular-nums font-mono ${
+                          selectedIncident.riskCategory === 'high'
+                            ? 'text-error'
+                            : selectedIncident.riskCategory === 'moderate'
+                            ? 'text-amber-400'
+                            : selectedIncident.riskCategory === 'low'
+                            ? 'text-primary'
+                            : 'text-outline'
+                        }`}
+                      >
+                        {selectedIncident.riskScore !== null ? selectedIncident.riskScore : 'N/A'}
+                      </span>
+                      <span className="text-xs text-outline font-mono">/ 100</span>
+                    </div>
+                    <span
+                      className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
+                        selectedIncident.riskCategory === 'high'
+                          ? 'bg-error/15 text-error border-error/30'
+                          : selectedIncident.riskCategory === 'moderate'
+                          ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                          : selectedIncident.riskCategory === 'low'
+                          ? 'bg-primary/15 text-primary border-primary/30'
+                          : 'bg-surface-container-highest text-outline border-outline-variant'
+                      }`}
+                    >
+                      {selectedIncident.riskCategory} Risk
+                    </span>
+                  </div>
+
+                  {/* 5-Component Score Breakdown */}
+                  {selectedIncident.scoreBreakdown && (
+                    <div className="space-y-1 pt-1.5 border-t border-outline-variant/40 text-[10px]">
+                      <div className="flex justify-between text-on-surface-variant font-mono">
+                        <span>Severity (S)</span>
+                        <span>{selectedIncident.scoreBreakdown.severity.contribution} pts</span>
+                      </div>
+                      <div className="flex justify-between text-on-surface-variant font-mono">
+                        <span>Rain Telemetry (R)</span>
+                        <span>
+                          {selectedIncident.scoreBreakdown.rain.available
+                            ? `${selectedIncident.scoreBreakdown.rain.contribution} pts`
+                            : 'Renormalized (N/A)'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between text-on-surface-variant font-mono">
+                        <span>Recency Half-Life (T)</span>
+                        <span>{selectedIncident.scoreBreakdown.recency.contribution} pts</span>
+                      </div>
+                      <div className="flex justify-between text-on-surface-variant font-mono">
+                        <span>Corroboration (C)</span>
+                        <span>{selectedIncident.scoreBreakdown.corroboration.contribution} pts</span>
+                      </div>
+                      <div className="flex justify-between text-on-surface-variant font-mono">
+                        <span>Spatial History (H)</span>
+                        <span>{selectedIncident.scoreBreakdown.hotspotHistory.contribution} pts</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Warnings / Caveats */}
+                  {selectedIncident.warnings && selectedIncident.warnings.length > 0 && (
+                    <div className="pt-1.5 border-t border-outline-variant/40 space-y-1">
+                      {selectedIncident.warnings.map((warn, idx) => (
+                        <div
+                          key={idx}
+                          className="text-[10px] text-outline leading-tight flex items-start gap-1"
+                        >
+                          <span className="text-secondary shrink-0">•</span>
+                          <span>{warn}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Hazard Type & Depth */}
