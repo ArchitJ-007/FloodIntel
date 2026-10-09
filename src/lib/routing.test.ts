@@ -46,7 +46,22 @@ const sampleRouteCoords: [number, number][] = [
   );
   assert.equal(invalidType.valid, false, 'NaN coordinates must be rejected');
 
-  console.log('✅ PASSED: Coordinate validation correctly rejects invalid, identical, and <200m endpoints');
+  // National India-wide route (Mumbai to Delhi, ~1,150 km)
+  const nationalRoute = validateRouteCoordinates(
+    { lat: 19.0760, lng: 72.8777 }, // Mumbai
+    { lat: 28.6139, lng: 77.2090 }  // Delhi
+  );
+  assert.equal(nationalRoute.valid, true, 'National route (Mumbai to Delhi ~1,150 km) must pass validation');
+
+  // Extreme international / out of bounds distance (> 3,500 km, e.g. Mumbai to London ~7,200 km)
+  const extremeDistance = validateRouteCoordinates(
+    { lat: 19.0760, lng: 72.8777 }, // Mumbai
+    { lat: 51.5074, lng: -0.1278 }  // London
+  );
+  assert.equal(extremeDistance.valid, false, 'Distance > 3500 km must be rejected');
+  assert.match(extremeDistance.error!, /3,500 km/, 'Error mentions 3,500 km limit');
+
+  console.log('✅ PASSED: Coordinate validation correctly rejects invalid, identical, <200m, and >3500km endpoints, while accepting national routes');
 }
 
 // 2. Route with Known Incident Near Route Increases Exposure Score

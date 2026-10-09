@@ -117,49 +117,6 @@ function PlanJourneyContent() {
     [destCoords.lat, destCoords.lng, destName]
   );
 
-  // Fetch routes from API
-  const handleCalculateRoutes = useCallback(async () => {
-    setIsCalculating(true);
-    setCalculationError(null);
-
-    try {
-      const response = await fetch('/api/routes/compare', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from: originCoords,
-          to: destCoords,
-          profile: travelMode === 'bike' ? 'bike' : 'driving',
-          avoidHazards: true,
-          hazards: incidents, // Pass live/demo active hazards
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        setCalculationError(data.error || 'Failed to calculate candidate routes.');
-        setRoutes([]);
-        setIsCalculating(false);
-        return;
-      }
-
-      const result = data as RouteComparisonResult;
-      setRoutes(result.routes);
-      setSelectedRouteId(result.recommendedRouteId || result.fastestRouteId || 'A');
-      setWarnings(result.warnings || []);
-      setComputedTimestamp(new Date().toLocaleTimeString());
-
-      // Fetch AI route comparison summary
-      fetchAiRouteSummary(result.routes);
-    } catch (err: any) {
-      setCalculationError(err.message || 'Routing service is temporarily unavailable.');
-      setRoutes([]);
-    } finally {
-      setIsCalculating(false);
-    }
-  }, [originCoords, destCoords, travelMode, incidents, fetchAiRouteSummary]);
-
   const fetchAiRouteSummary = useCallback(
     async (candidateRoutes: RouteOption[]) => {
       if (!candidateRoutes || candidateRoutes.length === 0) return;
@@ -202,6 +159,49 @@ function PlanJourneyContent() {
     },
     [travelMode]
   );
+
+  // Fetch routes from API
+  const handleCalculateRoutes = useCallback(async () => {
+    setIsCalculating(true);
+    setCalculationError(null);
+
+    try {
+      const response = await fetch('/api/routes/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: originCoords,
+          to: destCoords,
+          profile: travelMode === 'bike' ? 'bike' : 'driving',
+          avoidHazards: true,
+          hazards: incidents, // Pass live/demo active hazards
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setCalculationError(data.error || 'Failed to calculate candidate routes.');
+        setRoutes([]);
+        setIsCalculating(false);
+        return;
+      }
+
+      const result = data as RouteComparisonResult;
+      setRoutes(result.routes);
+      setSelectedRouteId(result.recommendedRouteId || result.fastestRouteId || 'A');
+      setWarnings(result.warnings || []);
+      setComputedTimestamp(new Date().toLocaleTimeString());
+
+      // Fetch AI route comparison summary
+      fetchAiRouteSummary(result.routes);
+    } catch (err: any) {
+      setCalculationError(err.message || 'Routing service is temporarily unavailable.');
+      setRoutes([]);
+    } finally {
+      setIsCalculating(false);
+    }
+  }, [originCoords, destCoords, travelMode, incidents, fetchAiRouteSummary]);
 
   // Initial load calculation
   useEffect(() => {
