@@ -5,7 +5,7 @@
 
 ---
 
-**FloodIntel** - An IEEE Synapse Hackathon Prototype Made By Our Team
+**FloodIntel** - An IEEE Synapse Hackathon Prototype Made By Our Team  
 Our Team Was Ranked **29** Out Of **57 Teams** For our Project
 
 ## 📌 Executive Summary
