@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 🌊 FloodIntel
 
 > **Real-Time Urban Flood Intelligence, Risk Assessment & Route Resilience System**  
@@ -132,3 +133,7 @@ FloodIntel/
 ## ⚖️ License & Hackathon Notice
 
 Developed for emergency disaster management evaluation. Real-world emergency decisions must follow official municipal disaster management authority instructions.
+=======
+# FloodIntel
+AI-powered flood monitoring, hazard reporting, and flood-aware route planning.
+>>>>>>> 90764522538fa0fc010e913296ccf402225723ee
