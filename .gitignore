@@ -1,0 +1,81 @@
+# ──────────────────────────────────────────────────────────────────
+# FloodIntel — .gitignore
+# ──────────────────────────────────────────────────────────────────
+
+# Dependencies
+/node_modules
+/.pnp
+.pnp.js
+.yarn/cache
+.yarn/unplugged
+.yarn/build-state.yml
+.yarn/install-state.gz
+.pnp.*
+
+# Next.js build output & caches
+/.next/
+/out/
+.next
+out
+
+# Production builds
+/build
+/dist
+
+# Debug & Runtime logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.log
+
+# Environment variables & secrets (CRITICAL: Never commit real keys)
+.env
+.env*.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+*.env
+
+# Exception: Keep the template example file
+!.env.example
+
+# Vercel & Deployment artifacts
+.vercel
+.turbo
+
+# TypeScript cache
+*.tsbuildinfo
+next-env.d.ts.bak
+
+# Operating System specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+
+# IDE & Editor configurations
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*~
+*.orig
+
+# Testing & Coverage
+/coverage
+/.nyc_output
+
+# Temporary scratch & debug files
+*.tmp
+*.temp
+/scratch
