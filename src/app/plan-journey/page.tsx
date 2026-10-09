@@ -63,6 +63,17 @@ export default function PlanJourneyPage() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [computedTimestamp, setComputedTimestamp] = useState<string | null>(null);
 
+  // AI Route Summary state
+  const [aiRouteSummary, setAiRouteSummary] = useState<{
+    headline: string;
+    summary: string;
+    tradeoffs: Array<{ routeId: string; summary: string }>;
+    caveats: string[];
+    recommendedRouteId: string;
+    generatedBy: 'gemini' | 'template';
+  } | null>(null);
+  const [isAiSummarizing, setIsAiSummarizing] = useState(false);
+
   const originProp = useMemo(
     () => ({ ...originCoords, name: originName }),
     [originCoords.lat, originCoords.lng, originName]
@@ -102,6 +113,9 @@ export default function PlanJourneyPage() {
       setSelectedRouteId(result.recommendedRouteId || result.fastestRouteId || 'A');
       setWarnings(result.warnings || []);
       setComputedTimestamp(new Date().toLocaleTimeString());
+
+      // Fetch AI route comparison summary
+      fetchAiRouteSummary(result.routes);
     } catch (err: any) {
       console.error('[Plan Journey] Route calculation error:', err);
       setCalculationError(err.message || 'Routing service is temporarily unavailable.');
@@ -109,6 +123,49 @@ export default function PlanJourneyPage() {
       setIsCalculating(false);
     }
   }, [originCoords, destCoords, travelMode, incidents]);
+
+  const fetchAiRouteSummary = useCallback(
+    async (candidateRoutes: RouteOption[]) => {
+      if (!candidateRoutes || candidateRoutes.length === 0) return;
+      setIsAiSummarizing(true);
+      try {
+        const res = await fetch('/api/ai/route-summary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            routes: candidateRoutes.map((r) => ({
+              id: r.id,
+              name: r.name,
+              distanceKm: r.distanceKm,
+              durationMin: r.durationMin,
+              hazardCount: r.hazardCount,
+              exposureScore: r.exposureScore,
+              exposureCategory: r.exposureCategory,
+              isFastest: r.isFastest,
+              isSafest: r.isSafest,
+              isRecommended: r.isRecommended,
+              relevantHazards: r.relevantHazards.map((h) => ({
+                incidentId: h.incidentId,
+                title: h.title,
+                severity: h.severity,
+                distanceAlongRouteKm: h.distanceAlongRouteKm,
+              })),
+            })),
+            travelMode,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setAiRouteSummary(data);
+        }
+      } catch (e) {
+        console.warn('AI route summary fetch failed:', e);
+      } finally {
+        setIsAiSummarizing(false);
+      }
+    },
+    [travelMode]
+  );
 
   // Initial load calculation
   useEffect(() => {
@@ -313,31 +370,75 @@ export default function PlanJourneyPage() {
             </div>
 
             {/* 2. Hydrologic Routing Advisory Box */}
-            <div className="bg-surface-container rounded-xl border border-secondary-container/40 p-4 relative overflow-hidden shadow-sm">
-              <div className="flex items-start gap-3">
-                <div className="p-1.5 rounded-lg bg-secondary-container/20 text-secondary border border-secondary/30 shrink-0 mt-0.5">
-                  <span
-                    className="material-symbols-outlined text-base"
-                    style={{ fontVariationSettings: "'FILL' 1" }}
-                  >
-                    auto_awesome
-                  </span>
-                </div>
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-semibold text-secondary">
-                      Hydrologic Route Evaluation
-                    </h3>
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant">
-                      {computedTimestamp ? `Updated ${computedTimestamp}` : 'Real-time'}
+            <div className="bg-surface-container rounded-xl border border-secondary-container/40 p-4 relative overflow-hidden shadow-sm space-y-3">
+              <div className="flex items-start justify-between gap-3 pb-2 border-b border-outline-variant/40">
+                <div className="flex items-center gap-2">
+                  <div className="p-1 rounded-lg bg-secondary-container/20 text-secondary border border-secondary/30 shrink-0">
+                    <span
+                      className="material-symbols-outlined text-base"
+                      style={{ fontVariationSettings: "'FILL' 1" }}
+                    >
+                      auto_awesome
                     </span>
                   </div>
-                  <p className="text-xs text-on-surface-variant leading-relaxed">
-                    {selectedRoute?.recommendationReason ||
-                      'Route evaluated against active municipal waterlogging and storm drain telemetry using Turf.js proximity buffers.'}
-                  </p>
+                  <h3 className="text-xs font-semibold text-secondary">
+                    AI Hydrologic Route Advisory
+                  </h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  {aiRouteSummary && (
+                    <span
+                      className={`text-[9px] font-mono uppercase px-2 py-0.5 rounded-full border ${
+                        aiRouteSummary.generatedBy === 'gemini'
+                          ? 'bg-purple-950/40 text-purple-300 border-purple-500/40'
+                          : 'bg-surface-container-high text-on-surface-variant border-outline-variant'
+                      }`}
+                    >
+                      {aiRouteSummary.generatedBy === 'gemini' ? '✨ Gemini AI' : 'Deterministic'}
+                    </span>
+                  )}
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-container-high text-on-surface-variant">
+                    {computedTimestamp ? `Updated ${computedTimestamp}` : 'Real-time'}
+                  </span>
                 </div>
               </div>
+
+              {isAiSummarizing ? (
+                <div className="space-y-1.5 animate-pulse py-1">
+                  <div className="h-3.5 bg-surface-container-high rounded w-3/4"></div>
+                  <div className="h-3 bg-surface-container-high rounded w-full"></div>
+                  <span className="text-[10px] text-outline font-mono flex items-center gap-1.5 pt-1">
+                    <span className="material-symbols-outlined text-xs animate-spin text-secondary">sync</span>
+                    <span>Analyzing flood exposure trade-offs with Gemini...</span>
+                  </span>
+                </div>
+              ) : (
+                <div className="space-y-2 text-xs">
+                  <div className="font-semibold text-on-surface text-xs">
+                    {aiRouteSummary?.headline || 'Optimal Corridor Selected'}
+                  </div>
+                  <p className="text-on-surface-variant leading-relaxed text-xs">
+                    {aiRouteSummary?.summary ||
+                      selectedRoute?.recommendationReason ||
+                      'Route evaluated against active municipal waterlogging and storm drain telemetry using Turf.js proximity buffers.'}
+                  </p>
+
+                  {/* Route Trade-off breakdown */}
+                  {aiRouteSummary?.tradeoffs && aiRouteSummary.tradeoffs.length > 0 && (
+                    <div className="space-y-1 pt-1.5 border-t border-outline-variant/30">
+                      <span className="text-[10px] uppercase font-mono text-outline block">
+                        Trade-Off Breakdown:
+                      </span>
+                      {aiRouteSummary.tradeoffs.map((t, idx) => (
+                        <div key={idx} className="text-[11px] text-on-surface-variant flex items-start gap-1.5">
+                          <strong className="font-mono text-primary shrink-0">Route {t.routeId}:</strong>
+                          <span>{t.summary}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* 3. Route Alternatives List */}

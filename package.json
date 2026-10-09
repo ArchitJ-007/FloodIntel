@@ -7,12 +7,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types src/lib/riskEngine.test.ts && node --experimental-strip-types src/lib/weather.test.ts && node --experimental-strip-types src/lib/routing.test.ts"
+    "test": "node --experimental-strip-types src/lib/riskEngine.test.ts && node --experimental-strip-types src/lib/weather.test.ts && node --experimental-strip-types src/lib/routing.test.ts && node --experimental-strip-types src/lib/gemini.test.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@google/genai": "^2.28.0",
     "@turf/turf": "^7.4.0",
     "@types/leaflet": "^1.9.22",
     "leaflet": "^1.9.4",

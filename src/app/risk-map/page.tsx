@@ -9,6 +9,7 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { useIncidents, Incident, normalizeSeverity } from '@/context/IncidentContext';
 import { useWeather } from '@/hooks/useWeather';
 import { calculateRiskScore } from '@/lib/riskEngine';
+import { AiRiskExplanation } from '@/components/AiRiskExplanation';
 
 // Dynamically import InteractiveFloodMap to prevent Leaflet browser APIs from executing during SSR
 const InteractiveFloodMap = dynamic(() => import('@/components/InteractiveFloodMap'), {
@@ -540,6 +541,43 @@ export default function RiskMapPage() {
                     </div>
                   );
                 })()}
+
+                {/* AI Natural-Language Risk Explanation */}
+                <AiRiskExplanation
+                  incident={selectedIncident}
+                  calculatedRiskScore={
+                    evaluatedSelectedRisk ? evaluatedSelectedRisk.score : selectedIncident.riskScore
+                  }
+                  scoreBreakdown={
+                    evaluatedSelectedRisk?.breakdown
+                      ? {
+                          severityScore: evaluatedSelectedRisk.breakdown.severity.contribution,
+                          rainScore: evaluatedSelectedRisk.breakdown.rain.contribution,
+                          recencyScore: evaluatedSelectedRisk.breakdown.recency.contribution,
+                          corroborationScore: evaluatedSelectedRisk.breakdown.corroboration.contribution,
+                          hotspotScore: evaluatedSelectedRisk.breakdown.hotspotHistory.contribution,
+                        }
+                      : selectedIncident.scoreBreakdown
+                      ? {
+                          severityScore: selectedIncident.scoreBreakdown.severity.contribution,
+                          rainScore: selectedIncident.scoreBreakdown.rain.contribution,
+                          recencyScore: selectedIncident.scoreBreakdown.recency.contribution,
+                          corroborationScore: selectedIncident.scoreBreakdown.corroboration.contribution,
+                          hotspotScore: selectedIncident.scoreBreakdown.hotspotHistory.contribution,
+                        }
+                      : undefined
+                  }
+                  weatherSnapshot={
+                    weather
+                      ? {
+                          precipitationMm: weather.current.precipitationMmPerHour,
+                          rainRiskIndex: weather.rainRiskIndex,
+                          intensityLabel: weather.intensityCategoryLabel,
+                          isStale: weather.isStale,
+                        }
+                      : undefined
+                  }
+                />
 
                 {/* Hazard Type & Depth */}
                 <div className="grid grid-cols-2 gap-2 bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/40">

@@ -24,6 +24,68 @@ export default function ReportHazardPage() {
   // Mini map pin position state
   const [pinPosition, setPinPosition] = useState({ x: 50, y: 50 });
 
+  // AI Incident Classification state
+  const [aiClassification, setAiClassification] = useState<any | null>(null);
+  const [isClassifying, setIsClassifying] = useState(false);
+  const [classificationError, setClassificationError] = useState<string | null>(null);
+
+  const handleClassify = async () => {
+    if (!description.trim()) return;
+    setIsClassifying(true);
+    setClassificationError(null);
+
+    try {
+      const res = await fetch('/api/ai/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description,
+          userCategory: hazardType,
+          userSeverity: severity,
+        }),
+      });
+
+      if (!res.ok) throw new Error('Classification request failed');
+      const data = await res.json();
+      setAiClassification(data);
+    } catch {
+      setClassificationError('AI classification temporarily unavailable.');
+    } finally {
+      setIsClassifying(false);
+    }
+  };
+
+  const applyAiSuggestions = () => {
+    if (!aiClassification) return;
+
+    // Apply category
+    if (aiClassification.suggestedCategory === 'drain_overflow') {
+      setHazardType('drainage_failure');
+    } else if (aiClassification.suggestedCategory === 'underpass_flooding') {
+      setHazardType('flooded_road');
+    } else if (aiClassification.suggestedCategory === 'road_closed') {
+      setHazardType('blocked_road');
+    } else {
+      setHazardType('waterlogging');
+    }
+
+    // Apply severity
+    if (aiClassification.suggestedSeverity === 'severe') {
+      setSeverity('high');
+    } else if (aiClassification.suggestedSeverity === 'moderate') {
+      setSeverity('moderate');
+    } else {
+      setSeverity('low');
+    }
+
+    // Apply depth
+    if (aiClassification.extractedDepthCm !== null) {
+      if (aiClassification.extractedDepthCm >= 50) setWaterDepth('deep');
+      else if (aiClassification.extractedDepthCm >= 20) setWaterDepth('knee');
+      else setWaterDepth('curb');
+    }
+  };
+
   // Submission state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdIncidentId, setCreatedIncidentId] = useState<string | null>(null);
@@ -501,6 +563,132 @@ export default function ReportHazardPage() {
                 <div className="flex justify-between items-center text-[11px] text-outline">
                   <span>Be specific about direction of travel and blocked choke points.</span>
                   <span className="font-mono">{description.length} / 500 characters</span>
+                </div>
+
+                {/* AI Assistant Classification Trigger & Suggestion Card */}
+                <div className="pt-2">
+                  <div className="flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={handleClassify}
+                      disabled={isClassifying || !description.trim()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-high border border-secondary/40 text-secondary hover:bg-secondary/10 text-xs font-semibold transition-all disabled:opacity-40"
+                    >
+                      <span
+                        className={`material-symbols-outlined text-sm ${isClassifying ? 'animate-spin' : ''}`}
+                        style={{ fontVariationSettings: "'FILL' 1" }}
+                      >
+                        {isClassifying ? 'sync' : 'auto_awesome'}
+                      </span>
+                      <span>{isClassifying ? 'Analyzing with Gemini...' : 'Analyze Description with AI'}</span>
+                    </button>
+                    <span className="text-[10px] text-outline font-mono">
+                      Editable Suggestion • Non-binding
+                    </span>
+                  </div>
+
+                  {classificationError && (
+                    <div className="mt-2 p-2 rounded bg-error/15 border border-error/30 text-[11px] text-error flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-xs">error</span>
+                      <span>{classificationError}</span>
+                    </div>
+                  )}
+
+                  {aiClassification && (
+                    <div className="mt-3 p-3.5 rounded-xl bg-surface-container border border-secondary-container/50 space-y-3 animate-in fade-in">
+                      <div className="flex items-center justify-between pb-2 border-b border-outline-variant/40">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="material-symbols-outlined text-secondary text-sm"
+                            style={{ fontVariationSettings: "'FILL' 1" }}
+                          >
+                            smart_toy
+                          </span>
+                          <span className="text-xs font-bold text-secondary">
+                            AI-Suggested Parameters
+                          </span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-surface-container-high text-on-surface-variant">
+                            {Math.round(aiClassification.confidence * 100)}% Confidence
+                          </span>
+                        </div>
+                        <span
+                          className={`text-[9px] font-mono uppercase px-2 py-0.5 rounded-full border ${
+                            aiClassification.generatedBy === 'gemini'
+                              ? 'bg-purple-950/40 text-purple-300 border-purple-500/40'
+                              : 'bg-surface-container-high text-on-surface-variant border-outline-variant'
+                          }`}
+                        >
+                          {aiClassification.generatedBy === 'gemini' ? 'Gemini AI' : 'Deterministic Template'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                        <div className="p-2 rounded bg-surface-container-low border border-outline-variant/40">
+                          <span className="text-[10px] uppercase font-mono text-outline block">
+                            Suggested Type
+                          </span>
+                          <strong className="text-on-surface capitalize">
+                            {aiClassification.suggestedCategory.replace(/_/g, ' ')}
+                          </strong>
+                        </div>
+                        <div className="p-2 rounded bg-surface-container-low border border-outline-variant/40">
+                          <span className="text-[10px] uppercase font-mono text-outline block">
+                            Suggested Severity
+                          </span>
+                          <strong
+                            className={
+                              aiClassification.suggestedSeverity === 'severe'
+                                ? 'text-error'
+                                : aiClassification.suggestedSeverity === 'moderate'
+                                ? 'text-amber-400'
+                                : 'text-primary'
+                            }
+                          >
+                            {aiClassification.suggestedSeverity.toUpperCase()}
+                          </strong>
+                        </div>
+                        <div className="p-2 rounded bg-surface-container-low border border-outline-variant/40">
+                          <span className="text-[10px] uppercase font-mono text-outline block">
+                            Extracted Depth
+                          </span>
+                          <strong className="text-on-surface">
+                            {aiClassification.extractedDepthCm !== null
+                              ? `≈ ${aiClassification.extractedDepthCm} cm`
+                              : 'Not specified in text'}
+                          </strong>
+                        </div>
+                      </div>
+
+                      {/* Warnings / Contradictions */}
+                      {aiClassification.warnings && aiClassification.warnings.length > 0 && (
+                        <div className="p-2 rounded bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300 space-y-0.5">
+                          {aiClassification.warnings.map((w: string, idx: number) => (
+                            <div key={idx} className="flex items-start gap-1">
+                              <span className="material-symbols-outlined text-xs shrink-0 mt-0.5">
+                                warning
+                              </span>
+                              <span>{w}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Apply Button & Disclaimer */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
+                        <span className="text-[10px] text-outline">
+                          Does not auto-verify reports; you retain full control before submission.
+                        </span>
+                        <button
+                          type="button"
+                          onClick={applyAiSuggestions}
+                          className="px-3 py-1.5 rounded-lg bg-primary text-on-primary font-semibold text-xs flex items-center justify-center gap-1.5 hover:bg-opacity-90 transition-colors shadow-sm"
+                        >
+                          <span className="material-symbols-outlined text-xs">check_circle</span>
+                          <span>Apply AI Suggestions to Form</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
