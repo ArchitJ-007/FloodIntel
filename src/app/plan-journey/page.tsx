@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { TopNavBar } from '@/components/TopNavBar';
 import { Footer } from '@/components/Footer';
 import { RouteOption, RouteComparisonResult, RouteCoordinates } from '@/lib/routing';
 import { useIncidents } from '@/context/IncidentContext';
+import { LocationSearchBox } from '@/components/LocationSearchBox';
 
 // Dynamically import Leaflet Journey Map to prevent SSR execution
 const InteractiveJourneyMap = dynamic(() => import('@/components/InteractiveJourneyMap'), {
@@ -19,39 +21,70 @@ const InteractiveJourneyMap = dynamic(() => import('@/components/InteractiveJour
   ),
 });
 
-// Demo City Corridor Preset Landmarks
+// Major Indian Metros Corridor Presets
 const CORRIDOR_PRESETS = [
   {
-    name: 'Koramangala 4th Cross & 80ft Rd',
-    coords: { lat: 12.9348, lng: 77.6205 },
-    role: 'origin' as const,
+    name: 'Silk Board → EcoSpace (Bengaluru)',
+    origin: { name: 'Silk Board Junction, Bengaluru', coords: { lat: 12.9175, lng: 77.6234 } },
+    dest: { name: 'Bellandur EcoSpace, Bengaluru', coords: { lat: 12.9260, lng: 77.6762 } },
   },
   {
-    name: 'Tech Park Campus (North Ring Rd J4)',
-    coords: { lat: 12.9550, lng: 77.6400 },
-    role: 'destination' as const,
+    name: 'Dadar → BKC (Mumbai)',
+    origin: { name: 'Hindmata Flyover, Dadar, Mumbai', coords: { lat: 19.0068, lng: 72.8427 } },
+    dest: { name: 'Bandra Kurla Complex (BKC), Mumbai', coords: { lat: 19.0657, lng: 72.8687 } },
   },
   {
-    name: 'Sector 3 East Canal (12th Main Rd)',
-    coords: { lat: 12.9412, lng: 77.6321 },
-    role: 'waypoint' as const,
+    name: 'Connaught Place → ITO (Delhi)',
+    origin: { name: 'Minto Bridge Underpass, New Delhi', coords: { lat: 28.6369, lng: 77.2273 } },
+    dest: { name: 'ITO Ring Road, New Delhi', coords: { lat: 28.6297, lng: 77.2435 } },
   },
   {
-    name: 'Old Airport Road Spillway Checkpoint',
-    coords: { lat: 12.9450, lng: 77.6300 },
-    role: 'destination' as const,
+    name: 'Velachery → T. Nagar (Chennai)',
+    origin: { name: 'Velachery Bypass, Chennai', coords: { lat: 12.9791, lng: 80.2185 } },
+    dest: { name: 'T. Nagar Usman Rd, Chennai', coords: { lat: 13.0418, lng: 80.2341 } },
   },
 ];
 
-export default function PlanJourneyPage() {
+function PlanJourneyContent() {
   const { incidents } = useIncidents();
+  const searchParams = useSearchParams();
+
+  const paramFromLat = searchParams.get('fromLat') ? parseFloat(searchParams.get('fromLat')!) : null;
+  const paramFromLng = searchParams.get('fromLng') ? parseFloat(searchParams.get('fromLng')!) : null;
+  const paramFromName = searchParams.get('fromName') || null;
+
+  const paramToLat = searchParams.get('toLat') ? parseFloat(searchParams.get('toLat')!) : null;
+  const paramToLng = searchParams.get('toLng') ? parseFloat(searchParams.get('toLng')!) : null;
+  const paramToName = searchParams.get('toName') || null;
 
   // Route Origin and Destination state
-  const [originName, setOriginName] = useState('Koramangala 4th Cross & 80ft Rd');
-  const [originCoords, setOriginCoords] = useState<RouteCoordinates>({ lat: 12.9348, lng: 77.6205 });
+  const [originName, setOriginName] = useState(
+    paramFromName || 'Koramangala 4th Cross & 80ft Rd'
+  );
+  const [originCoords, setOriginCoords] = useState<RouteCoordinates>({
+    lat: paramFromLat !== null && !isNaN(paramFromLat) ? paramFromLat : 12.9348,
+    lng: paramFromLng !== null && !isNaN(paramFromLng) ? paramFromLng : 77.6205,
+  });
 
-  const [destName, setDestName] = useState('Tech Park Campus (North Ring Rd J4)');
-  const [destCoords, setDestCoords] = useState<RouteCoordinates>({ lat: 12.9550, lng: 77.6400 });
+  const [destName, setDestName] = useState(
+    paramToName || 'Tech Park Campus (North Ring Rd J4)'
+  );
+  const [destCoords, setDestCoords] = useState<RouteCoordinates>({
+    lat: paramToLat !== null && !isNaN(paramToLat) ? paramToLat : 12.9550,
+    lng: paramToLng !== null && !isNaN(paramToLng) ? paramToLng : 77.6400,
+  });
+
+  // Sync searchParams if URL changes
+  useEffect(() => {
+    if (paramFromLat !== null && paramFromLng !== null && !isNaN(paramFromLat) && !isNaN(paramFromLng)) {
+      setOriginCoords({ lat: paramFromLat, lng: paramFromLng });
+      if (paramFromName) setOriginName(paramFromName);
+    }
+    if (paramToLat !== null && paramToLng !== null && !isNaN(paramToLat) && !isNaN(paramToLng)) {
+      setDestCoords({ lat: paramToLat, lng: paramToLng });
+      if (paramToName) setDestName(paramToName);
+    }
+  }, [paramFromLat, paramFromLng, paramFromName, paramToLat, paramToLng, paramToName]);
 
   const [travelMode, setTravelMode] = useState<'drive' | 'bike' | 'transit'>('drive');
 
@@ -214,59 +247,61 @@ export default function PlanJourneyPage() {
                 <div className="absolute left-[19px] top-[26px] bottom-[26px] w-0.5 border-l-2 border-dashed border-outline-variant pointer-events-none"></div>
 
                 {/* Origin Field */}
-                <div className="relative flex items-center">
-                  <div className="absolute left-3 flex items-center justify-center text-tertiary">
-                    <span
-                      className="material-symbols-outlined text-[18px]"
-                      style={{ fontVariationSettings: "'FILL' 1" }}
-                    >
-                      trip_origin
-                    </span>
-                  </div>
-                  <input
-                    type="text"
-                    value={originName}
-                    onChange={(e) => setOriginName(e.target.value)}
-                    placeholder="Starting Location"
-                    className="w-full pl-9 pr-8 py-2 bg-surface-container-low border border-outline-variant rounded-lg text-xs sm:text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none transition-colors"
+                <div className="space-y-1">
+                  <LocationSearchBox
+                    id="journey-origin"
+                    placeholder="Search origin across India (e.g. Silk Board, Dadar, CP)..."
+                    initialValue={originName}
+                    icon="trip_origin"
+                    iconColor="text-tertiary"
+                    onSelect={(place) => {
+                      setOriginName(place.formattedAddress || place.name);
+                      setOriginCoords({ lat: place.lat, lng: place.lng });
+                    }}
+                    inputClassName="bg-surface-container-low"
                   />
+                  <div className="flex items-center justify-between text-[10px] font-mono text-outline px-1">
+                    <span>GPS: {originCoords.lat.toFixed(4)}° N, {originCoords.lng.toFixed(4)}° E</span>
+                    <span className="text-tertiary">Origin Resolved</span>
+                  </div>
                 </div>
 
                 {/* Swap button in middle */}
                 <div className="flex justify-end pr-1 -my-1 z-10 relative">
                   <button
                     onClick={handleSwapLocations}
-                    className="w-6 h-6 rounded bg-surface-container-highest border border-outline-variant flex items-center justify-center text-outline hover:text-primary transition-colors"
-                    title="Swap locations"
+                    className="w-6 h-6 rounded bg-surface-container-highest border border-outline-variant flex items-center justify-center text-outline hover:text-primary transition-colors shadow-sm"
+                    title="Swap origin and destination"
                   >
                     <span className="material-symbols-outlined text-sm">swap_vert</span>
                   </button>
                 </div>
 
                 {/* Destination Field */}
-                <div className="relative flex items-center">
-                  <div className="absolute left-3 flex items-center justify-center text-error">
-                    <span
-                      className="material-symbols-outlined text-[18px]"
-                      style={{ fontVariationSettings: "'FILL' 1" }}
-                    >
-                      location_on
-                    </span>
-                  </div>
-                  <input
-                    type="text"
-                    value={destName}
-                    onChange={(e) => setDestName(e.target.value)}
-                    placeholder="Destination"
-                    className="w-full pl-9 pr-3 py-2 bg-surface-container-low border border-outline-variant rounded-lg text-xs sm:text-sm text-on-surface focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none transition-colors"
+                <div className="space-y-1">
+                  <LocationSearchBox
+                    id="journey-destination"
+                    placeholder="Search destination across India (e.g. Bellandur, BKC, Noida)..."
+                    initialValue={destName}
+                    icon="location_on"
+                    iconColor="text-error"
+                    onSelect={(place) => {
+                      setDestName(place.formattedAddress || place.name);
+                      setDestCoords({ lat: place.lat, lng: place.lng });
+                    }}
+                    inputClassName="bg-surface-container-low"
                   />
+                  <div className="flex items-center justify-between text-[10px] font-mono text-outline px-1">
+                    <span>GPS: {destCoords.lat.toFixed(4)}° N, {destCoords.lng.toFixed(4)}° E</span>
+                    <span className="text-error">Destination Resolved</span>
+                  </div>
                 </div>
               </div>
 
               {/* Corridor Preset Chips for Quick Testing */}
-              <div className="pt-1 border-t border-outline-variant/60">
-                <span className="text-[10px] uppercase font-mono text-outline block mb-1">
-                  Corridor Presets (Bangalore):
+              <div className="pt-2 border-t border-outline-variant/60">
+                <span className="text-[10px] uppercase font-mono text-outline block mb-1.5">
+                  India Corridor Presets:
                 </span>
                 <div className="flex flex-wrap gap-1.5">
                   {CORRIDOR_PRESETS.map((preset, idx) => (
@@ -274,17 +309,14 @@ export default function PlanJourneyPage() {
                       key={idx}
                       type="button"
                       onClick={() => {
-                        if (preset.role === 'destination') {
-                          setDestName(preset.name);
-                          setDestCoords(preset.coords);
-                        } else {
-                          setOriginName(preset.name);
-                          setOriginCoords(preset.coords);
-                        }
+                        setOriginName(preset.origin.name);
+                        setOriginCoords(preset.origin.coords);
+                        setDestName(preset.dest.name);
+                        setDestCoords(preset.dest.coords);
                       }}
-                      className="text-[10px] px-2 py-0.5 rounded bg-surface-container-high border border-outline-variant hover:border-primary text-on-surface-variant hover:text-white transition-colors"
+                      className="text-[10px] px-2 py-1 rounded bg-surface-container-high border border-outline-variant hover:border-primary text-on-surface-variant hover:text-white transition-colors"
                     >
-                      {preset.name.split(' (')[0]}
+                      {preset.name}
                     </button>
                   ))}
                 </div>
@@ -720,5 +752,19 @@ export default function PlanJourneyPage() {
 
       <Footer />
     </div>
+  );
+}
+
+export default function PlanJourneyPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-surface flex items-center justify-center text-on-surface-variant font-mono text-xs">
+          Loading Journey Planner...
+        </div>
+      }
+    >
+      <PlanJourneyContent />
+    </Suspense>
   );
 }

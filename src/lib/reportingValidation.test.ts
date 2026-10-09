@@ -159,6 +159,54 @@ assert(
   'Trims location cleanly'
 );
 
+// Nationwide Indian Cities Coordinate Acceptance Tests
+console.log('\nTesting Nationwide Indian Coordinate Acceptance:');
+const mumbaiReport = validateHazardReport({
+  description: 'Severe waterlogging at Dadar TT circle near Hindmata flyover.',
+  location: 'Dadar TT Circle, Mumbai',
+  coordinates: { lat: 19.0178, lng: 72.8478 },
+  hazardType: 'waterlogging',
+  severity: 'high',
+  waterDepth: 'knee',
+});
+assert(mumbaiReport.isValid, 'Accepts Mumbai coordinates without out-of-bounds error');
+assert(!mumbaiReport.warnings.some(w => w.includes('outside')), 'Mumbai has no outside India warning');
+
+const delhiReport = validateHazardReport({
+  description: 'Minto Bridge underpass completely submerged after cloudburst.',
+  location: 'Minto Bridge Underpass, Delhi',
+  coordinates: { lat: 28.6329, lng: 77.2195 },
+  hazardType: 'flooded_road',
+  severity: 'high',
+  waterDepth: 'deep',
+});
+assert(delhiReport.isValid, 'Accepts Delhi coordinates without out-of-bounds error');
+
+const chennaiReport = validateHazardReport({
+  description: 'Velachery main road inundated up to knee depth with slow draining.',
+  location: 'Velachery Main Road, Chennai',
+  coordinates: { lat: 12.9815, lng: 80.2180 },
+  hazardType: 'waterlogging',
+  severity: 'moderate',
+  waterDepth: 'knee',
+});
+assert(chennaiReport.isValid, 'Accepts Chennai coordinates without out-of-bounds error');
+
+// Outside India coordinates test (e.g. London, UK)
+const outsideIndiaReport = validateHazardReport({
+  description: 'Flooding near Thames riverbank after heavy torrential downpour.',
+  location: 'London Bridge, UK',
+  coordinates: { lat: 51.5074, lng: -0.1278 },
+  hazardType: 'flooded_road',
+  severity: 'moderate',
+  waterDepth: 'curb',
+});
+assert(outsideIndiaReport.isValid, 'Still valid if coords are geocoded coordinates');
+assert(
+  outsideIndiaReport.warnings.some(w => w.toLowerCase().includes('outside') || w.toLowerCase().includes('india')),
+  'Issues explicit warning when coordinates are outside India bounds'
+);
+
 // ==========================================
 // 4. Distance Calculation
 // ==========================================

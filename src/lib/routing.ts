@@ -127,10 +127,10 @@ export function validateRouteCoordinates(
     };
   }
 
-  if (distanceKm > 150) {
+  if (distanceKm > 300) {
     return {
       valid: false,
-      error: 'Route distance exceeds maximum supported regional corridor range (150 km).',
+      error: 'Route distance exceeds maximum supported regional corridor range (300 km).',
       distanceKm,
     };
   }

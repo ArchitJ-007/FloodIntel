@@ -41,7 +41,7 @@ export default function InteractiveJourneyMap({
         zoom: 13,
         zoomControl: false,
         attributionControl: false,
-        minZoom: 10,
+        minZoom: 4,
         maxZoom: 19,
       });
 

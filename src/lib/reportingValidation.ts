@@ -15,7 +15,14 @@ export const REPORT_VALIDATION_CONFIG = {
   validHazardTypes: ['waterlogging', 'flooded_road', 'blocked_road', 'drainage_failure'] as const,
   validSeverities: ['low', 'moderate', 'high'] as const,
   validWaterDepths: ['curb', 'knee', 'deep'] as const,
-  // Metropolitan Bengaluru Corridor Bounding Box
+  // Republic of India Sovereign Geographic Bounds (Nationwide Support)
+  indiaBounds: {
+    minLat: 6.0,
+    maxLat: 37.5,
+    minLng: 68.0,
+    maxLng: 97.5,
+  },
+  // Metropolitan reference corridor
   cityBounds: {
     minLat: 12.80,
     maxLat: 13.15,
@@ -179,11 +186,11 @@ export function validateHazardReport(input: HazardReportInput): ValidationResult
     if (!errors.coordinates) {
       resolvedCoords = { lat: Number(lat.toFixed(5)), lng: Number(lng.toFixed(5)) };
 
-      // Geographic boundary check (Bengaluru Metropolitan Corridor)
-      const b = REPORT_VALIDATION_CONFIG.cityBounds;
+      // Geographic boundary check (Republic of India)
+      const b = REPORT_VALIDATION_CONFIG.indiaBounds;
       if (lat < b.minLat || lat > b.maxLat || lng < b.minLng || lng > b.maxLng) {
         warnings.push(
-          `Coordinates (${lat.toFixed(4)}, ${lng.toFixed(4)}) lie outside primary Sector 4 municipal monitoring boundary. Report will be filed with regional dispatch.`
+          `Coordinates (${lat.toFixed(4)}, ${lng.toFixed(4)}) lie outside standard national monitoring bounds for India. Report will be logged with international coordination.`
         );
       }
     }

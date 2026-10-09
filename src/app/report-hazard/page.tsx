@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { TopNavBar } from '@/components/TopNavBar';
 import { Footer } from '@/components/Footer';
 import { useIncidents, HazardCategory, SeverityType } from '@/context/IncidentContext';
@@ -10,13 +11,41 @@ import {
   detectDuplicateReport,
   DuplicateMatchInfo,
 } from '@/lib/reportingValidation';
+import { LocationSearchBox } from '@/components/LocationSearchBox';
 
-export default function ReportHazardPage() {
+function ReportHazardContent() {
   const { addHazard, incidents } = useIncidents();
+  const searchParams = useSearchParams();
+
+  const paramLat = searchParams.get('lat') ? parseFloat(searchParams.get('lat')!) : null;
+  const paramLng = searchParams.get('lng') ? parseFloat(searchParams.get('lng')!) : null;
+  const paramLocation = searchParams.get('location') || null;
 
   // Form states
-  const [location, setLocation] = useState('4th Cross Rd & 80ft Road Junction, Koramangala');
-  const [gpsCoordinates, setGpsCoordinates] = useState('GPS: 12.9348° N, 77.6205° E • Sector 4 Basin');
+  const [location, setLocation] = useState(
+    paramLocation || '4th Cross Rd & 80ft Road Junction, Koramangala'
+  );
+  const [reportCoords, setReportCoords] = useState<{ lat: number; lng: number }>({
+    lat: paramLat !== null && !isNaN(paramLat) ? paramLat : 12.9348,
+    lng: paramLng !== null && !isNaN(paramLng) ? paramLng : 77.6205,
+  });
+
+  const [gpsCoordinates, setGpsCoordinates] = useState(
+    paramLat !== null && paramLng !== null
+      ? `GPS: ${paramLat.toFixed(4)}° N, ${paramLng.toFixed(4)}° E • India`
+      : 'GPS: 12.9348° N, 77.6205° E • Sector 4 Basin'
+  );
+
+  useEffect(() => {
+    if (paramLat !== null && paramLng !== null && !isNaN(paramLat) && !isNaN(paramLng)) {
+      setReportCoords({ lat: paramLat, lng: paramLng });
+      setGpsCoordinates(`GPS: ${paramLat.toFixed(4)}° N, ${paramLng.toFixed(4)}° E • India`);
+    }
+    if (paramLocation) {
+      setLocation(paramLocation);
+    }
+  }, [paramLat, paramLng, paramLocation]);
+
   const [hazardType, setHazardType] = useState<HazardCategory>('waterlogging');
   const [severity, setSeverity] = useState<SeverityType>('high');
   const [waterDepth, setWaterDepth] = useState<'curb' | 'knee' | 'deep'>('knee');
@@ -104,9 +133,9 @@ export default function ReportHazardPage() {
     setGeneralError(null);
     setIsSubmitting(true);
 
-    // Derive coordinates from mini map pin position
-    const lat = Number((12.9352 + (50 - pinPosition.y) * 0.0004).toFixed(5));
-    const lng = Number((77.6245 + (pinPosition.x - 50) * 0.0004).toFixed(5));
+    // Derive coordinates relative to selected Indian location
+    const lat = Number((reportCoords.lat + (50 - pinPosition.y) * 0.0004).toFixed(5));
+    const lng = Number((reportCoords.lng + (pinPosition.x - 50) * 0.0004).toFixed(5));
 
     // 1. Client-Side Validation
     const clientValidation = validateHazardReport({
@@ -214,17 +243,18 @@ export default function ReportHazardPage() {
     if (navigator?.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          const lat = pos.coords.latitude.toFixed(4);
-          const lng = pos.coords.longitude.toFixed(4);
-          setGpsCoordinates(`GPS: ${lat}° N, ${lng}° E • Sector 4 Basin`);
-          setLocation(`Current Geo-Tagged Location (${lat}, ${lng})`);
+          const latVal = Number(pos.coords.latitude.toFixed(4));
+          const lngVal = Number(pos.coords.longitude.toFixed(4));
+          setReportCoords({ lat: latVal, lng: lngVal });
+          setGpsCoordinates(`GPS: ${latVal}° N, ${lngVal}° E • Acquired via Device GPS`);
+          setLocation(`Device GPS Acquired Location (${latVal}, ${lngVal})`);
         },
         () => {
-          setGpsCoordinates('GPS: 12.9352° N, 77.6241° E (Device Location Acquired)');
+          setGpsCoordinates('GPS acquisition unavailable. Please use the location search bar above.');
         }
       );
     } else {
-      setGpsCoordinates('GPS: 12.9352° N, 77.6241° E (Device Location Acquired)');
+      setGpsCoordinates('GPS acquisition unavailable on this device.');
     }
   };
 
@@ -335,22 +365,24 @@ export default function ReportHazardPage() {
               {/* Location Search Field */}
               <div className="space-y-1.5">
                 <label htmlFor="location-query" className="block text-xs font-semibold text-on-surface">
-                  Street Address / Landmark
+                  Street Address / Landmark (Nationwide India Search)
                 </label>
-                <div className="relative">
-                  <span className="material-symbols-outlined absolute left-3 top-2.5 text-outline text-lg">
-                    search
-                  </span>
-                  <input
-                    id="location-query"
-                    type="text"
-                    required
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    placeholder="Enter street name, cross street, or landmark..."
-                    className="w-full bg-[#122131] border border-[#222F44] rounded-lg pl-9 pr-4 py-2 text-xs sm:text-sm text-on-surface placeholder-outline focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                  />
-                </div>
+                <LocationSearchBox
+                  id="location-query"
+                  placeholder="Search street name, landmark, or Indian city (e.g. Mumbai, Delhi, Silk Board)..."
+                  initialValue={location}
+                  icon="location_on"
+                  iconColor="text-primary"
+                  onSelect={(place) => {
+                    setLocation(place.formattedAddress || place.name);
+                    setGpsCoordinates(
+                      `GPS: ${place.lat.toFixed(4)}° N, ${place.lng.toFixed(4)}° E • ${place.state || 'India'}`
+                    );
+                    setReportCoords({ lat: place.lat, lng: place.lng });
+                    setErrors((prev) => ({ ...prev, location: '' }));
+                  }}
+                  inputClassName="bg-[#122131] border-[#222F44]"
+                />
                 {errors.location && (
                   <p className="text-xs text-error mt-1 flex items-center gap-1">
                     <span className="material-symbols-outlined text-xs">error</span>
@@ -968,5 +1000,19 @@ export default function ReportHazardPage() {
 
       <Footer />
     </div>
+  );
+}
+
+export default function ReportHazardPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#0B1120] flex items-center justify-center text-on-surface-variant font-mono text-xs">
+          Loading Report Form...
+        </div>
+      }
+    >
+      <ReportHazardContent />
+    </Suspense>
   );
 }

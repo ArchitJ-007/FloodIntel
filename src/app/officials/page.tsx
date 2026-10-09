@@ -74,7 +74,7 @@ export default function OfficialsDashboardPage() {
 
             <div className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-surface-container border border-outline-variant text-on-surface-variant text-xs">
               <span className="material-symbols-outlined text-sm text-secondary">badge</span>
-              <span>Operator: J. Doe (Sector 4 Emergency Ops)</span>
+              <span>Operator: Duty Officer (National Emergency Operations Console)</span>
             </div>
           </div>
 

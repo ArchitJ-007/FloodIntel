@@ -42,7 +42,7 @@ export default function InteractiveFloodMap({
         zoom,
         zoomControl: false, // Custom position
         attributionControl: false, // Custom position
-        minZoom: 10,
+        minZoom: 4,
         maxZoom: 19,
       });
 
@@ -88,6 +88,14 @@ export default function InteractiveFloodMap({
       console.error('Leaflet initialization error:', err);
     }
   }, []);
+
+  // Fly to new center when center coordinate prop updates
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (map && center && center.length === 2) {
+      map.flyTo(center, zoom || 13, { duration: 1.2 });
+    }
+  }, [center[0], center[1], zoom]);
 
   // Update Tile Layer when mapTheme changes
   useEffect(() => {

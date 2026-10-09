@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { TopNavBar } from '@/components/TopNavBar';
 import { SeverityBadge } from '@/components/SeverityBadge';
@@ -10,6 +11,7 @@ import { useIncidents, Incident, normalizeSeverity } from '@/context/IncidentCon
 import { useWeather } from '@/hooks/useWeather';
 import { calculateRiskScore } from '@/lib/riskEngine';
 import { AiRiskExplanation } from '@/components/AiRiskExplanation';
+import { LocationSearchBox } from '@/components/LocationSearchBox';
 
 // Dynamically import InteractiveFloodMap to prevent Leaflet browser APIs from executing during SSR
 const InteractiveFloodMap = dynamic(() => import('@/components/InteractiveFloodMap'), {
@@ -22,8 +24,28 @@ const InteractiveFloodMap = dynamic(() => import('@/components/InteractiveFloodM
   ),
 });
 
-export default function RiskMapPage() {
+function RiskMapContent() {
   const { incidents, selectedIncident, setSelectedIncidentId, stats } = useIncidents();
+  const searchParams = useSearchParams();
+  const paramLat = searchParams.get('lat') ? parseFloat(searchParams.get('lat')!) : null;
+  const paramLng = searchParams.get('lng') ? parseFloat(searchParams.get('lng')!) : null;
+  const paramLabel = searchParams.get('label') || null;
+
+  const [activeLocation, setActiveLocation] = useState<{ lat: number; lng: number; label: string }>({
+    lat: paramLat !== null && !isNaN(paramLat) ? paramLat : 12.9352,
+    lng: paramLng !== null && !isNaN(paramLng) ? paramLng : 77.6245,
+    label: paramLabel || 'Koramangala, Bengaluru',
+  });
+
+  useEffect(() => {
+    if (paramLat !== null && paramLng !== null && !isNaN(paramLat) && !isNaN(paramLng)) {
+      setActiveLocation({
+        lat: paramLat,
+        lng: paramLng,
+        label: paramLabel || 'Selected Location',
+      });
+    }
+  }, [paramLat, paramLng, paramLabel]);
 
   // Filters state
   const [searchQuery, setSearchQuery] = useState('');
@@ -43,14 +65,13 @@ export default function RiskMapPage() {
   const [timeWindow, setTimeWindow] = useState('3h');
   const [sharedAlertMessage, setSharedAlertMessage] = useState<string | null>(null);
 
-  // Live Weather Telemetry (Open-Meteo) for configured city coordinates (Koramangala, Sector 4 Basin)
-  const cityCoordinates = useMemo(() => ({ lat: 12.9352, lng: 77.6245 }), []);
+  // Live Weather Telemetry (Open-Meteo) for dynamically selected city coordinates across India
   const {
     weather,
     isLoading: isWeatherLoading,
     error: weatherError,
     refetch: refetchWeather,
-  } = useWeather(cityCoordinates.lat, cityCoordinates.lng);
+  } = useWeather(activeLocation.lat, activeLocation.lng);
 
   // Prevent hydration mismatches by ensuring client-side dynamic risk re-evaluation runs only after mount
   const [hasMounted, setHasMounted] = useState(false);
@@ -131,26 +152,33 @@ export default function RiskMapPage() {
       {/* Sub-header Bar / Tactical Control Strip */}
       <section className="w-full bg-surface-container-low border-b border-outline-variant py-2.5 px-4 md:px-6 z-30">
         <div className="w-full mx-auto flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-3">
-          {/* Search Input */}
-          <div className="relative flex-1 max-w-2xl">
-            <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-outline">
-              <span className="material-symbols-outlined text-lg">search</span>
-            </span>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search streets, landmarks, or zones (e.g. Sector 4, Metro Underpass)..."
-              className="w-full pl-9 pr-12 py-1.5 bg-surface border border-outline-variant rounded-md text-xs sm:text-sm text-on-surface placeholder:text-outline focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary h-[38px] transition-all"
+          {/* Location Search Input */}
+          <div className="relative flex-1 max-w-xl">
+            <LocationSearchBox
+              id="risk-map-place-search"
+              placeholder="Search or fly to any Indian city or locality (e.g. Mumbai, Delhi, Pune, Silk Board)..."
+              initialValue={searchQuery}
+              onSelect={(place) => {
+                setActiveLocation({
+                  lat: place.lat,
+                  lng: place.lng,
+                  label: place.formattedAddress || place.name,
+                });
+                setSearchQuery(place.name);
+              }}
+              inputClassName="bg-surface h-[38px]"
             />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute inset-y-0 right-2 flex items-center pr-2 text-outline hover:text-on-surface"
-              >
-                <span className="material-symbols-outlined text-sm">close</span>
-              </button>
-            )}
+          </div>
+
+          {/* Active City Location Chip */}
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-surface-container border border-outline-variant text-xs text-on-surface">
+            <span className="material-symbols-outlined text-primary text-sm">pin_drop</span>
+            <span className="font-semibold text-primary truncate max-w-[140px] sm:max-w-xs">
+              {activeLocation.label.split(',')[0]}
+            </span>
+            <span className="text-outline text-[10px] font-mono hidden sm:inline">
+              ({activeLocation.lat.toFixed(3)}°, {activeLocation.lng.toFixed(3)}°)
+            </span>
           </div>
 
           {/* Quick Statistics Badge & Weather Telemetry Pill */}
@@ -720,6 +748,7 @@ export default function RiskMapPage() {
             incidents={filteredIncidents}
             selectedIncidentId={selectedIncident?.id || null}
             onSelectIncident={setSelectedIncidentId}
+            center={[activeLocation.lat, activeLocation.lng]}
           />
 
           {/* Floating 'Plan a Journey' Shortcut Button on Map */}
@@ -751,5 +780,19 @@ export default function RiskMapPage() {
         </div>
       </footer>
     </div>
+  );
+}
+
+export default function RiskMapPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-surface-dim flex items-center justify-center text-on-surface-variant font-mono text-xs">
+          Loading Risk Map...
+        </div>
+      }
+    >
+      <RiskMapContent />
+    </Suspense>
   );
 }

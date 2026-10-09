@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types src/lib/riskEngine.test.ts && node --experimental-strip-types src/lib/weather.test.ts && node --experimental-strip-types src/lib/routing.test.ts && node --experimental-strip-types src/lib/gemini.test.ts && node --experimental-strip-types src/lib/reportingValidation.test.ts"
+    "test": "node --experimental-strip-types src/lib/riskEngine.test.ts && node --experimental-strip-types src/lib/weather.test.ts && node --experimental-strip-types src/lib/routing.test.ts && node --experimental-strip-types src/lib/gemini.test.ts && node --experimental-strip-types src/lib/reportingValidation.test.ts && node --experimental-strip-types src/lib/places.test.ts"
   },
   "keywords": [],
   "author": "",
