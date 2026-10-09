@@ -4,17 +4,101 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import { TopNavBar } from '@/components/TopNavBar';
 import { Footer } from '@/components/Footer';
-import { useIncidents } from '@/context/IncidentContext';
+import { useIncidents, type Incident } from '@/context/IncidentContext';
 import { LocationSearchBox } from '@/components/LocationSearchBox';
+import MapplsInteractiveMap, {
+  isValidLatLng,
+  type MapplsLatLng,
+  type MapplsMapMarker,
+  type MapplsMarkerTone,
+} from '@/components/MapplsInteractiveMap';
 import type { PlaceResult } from '@/lib/places';
+
+// Demo-view center: Koramangala basin, matching the seeded demo incident cluster.
+const DEMO_MAP_CENTER: MapplsLatLng = { lat: 12.9352, lng: 77.6245 };
+const DEMO_MAP_ZOOM = 13;
+const FOCUS_ZOOM = 15;
+
+function incidentMarkerTone(incident: Incident): MapplsMarkerTone {
+  if (incident.verificationStatus === 'unverified') return 'unverified';
+  if (incident.severity === 'high') return 'high';
+  if (incident.severity === 'moderate') return 'moderate';
+  return 'low';
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
 
 export default function LandingPage() {
   const { stats, incidents } = useIncidents();
   const [activePinId, setActivePinId] = useState<string>('#FLD-084');
   const [selectedPlace, setSelectedPlace] = useState<PlaceResult | null>(null);
 
+  // Controlled Mappls map view — recentering only happens for explicit view changes
+  // (search, quick jump, recenter button), never as a side effect of panning/zooming.
+  const [mapView, setMapView] = useState<{ center: MapplsLatLng; zoom: number; recenterKey: number }>({
+    center: DEMO_MAP_CENTER,
+    zoom: DEMO_MAP_ZOOM,
+    recenterKey: 0,
+  });
+  // Point picked directly on the real map (genuine SDK-reported coordinates).
+  const [pickedPoint, setPickedPoint] = useState<MapplsLatLng | null>(null);
+
   const selectedIncident =
     incidents.find((i) => i.id === activePinId) || incidents[0];
+
+  // Hazard markers are plotted strictly from genuine incident record coordinates.
+  const incidentMarkers: MapplsMapMarker[] = incidents
+    .filter((incident) => isValidLatLng(incident.coordinates))
+    .map((incident) => ({
+      id: incident.id,
+      lat: incident.coordinates.lat,
+      lng: incident.coordinates.lng,
+      tone: incidentMarkerTone(incident),
+      label: `${incident.id} · ${incident.title}`,
+      popupHtml: `<div style="font-size:11px;line-height:1.45;max-width:190px"><strong>${escapeHtml(
+        incident.id
+      )}</strong>${incident.provenance === 'demo' ? ' <em>[DEMO]</em>' : ''}<br/>${escapeHtml(
+        incident.title
+      )}<br/><span style="opacity:.7">${incident.location
+        .split('(')[0]
+        .slice(0, 60)
+        .replace(/</g, '')}</span></div>`,
+      onSelect: () => setActivePinId(incident.id),
+    }));
+
+  const focusMapOn = (center: MapplsLatLng, zoom: number) => {
+    setMapView((prev) => ({ center, zoom, recenterKey: prev.recenterKey + 1 }));
+  };
+
+  const handleMapPointSelect = (coords: MapplsLatLng) => {
+    // Coordinates are reported by the Mappls SDK click/tap event — never derived from CSS.
+    setPickedPoint(coords);
+  };
+
+  const handleRecenterMap = () => {
+    if (pickedPoint) {
+      focusMapOn(pickedPoint, FOCUS_ZOOM);
+      return;
+    }
+    if (selectedPlace) {
+      focusMapOn({ lat: selectedPlace.lat, lng: selectedPlace.lng }, FOCUS_ZOOM);
+      return;
+    }
+    if (isValidLatLng(selectedIncident?.coordinates)) {
+      focusMapOn(
+        { lat: selectedIncident.coordinates.lat, lng: selectedIncident.coordinates.lng },
+        FOCUS_ZOOM
+      );
+      return;
+    }
+    setMapView((prev) => ({ ...prev, center: DEMO_MAP_CENTER, zoom: DEMO_MAP_ZOOM, recenterKey: prev.recenterKey + 1 }));
+  };
 
   return (
     <div className="bg-surface-dim text-on-surface antialiased min-h-screen flex flex-col font-sans">
@@ -52,7 +136,13 @@ export default function LandingPage() {
                 <LocationSearchBox
                   id="landing-place-search"
                   placeholder="Enter city or locality (e.g. Mumbai, Delhi, Pune, Chennai, Silk Board)..."
-                  onSelect={(place) => setSelectedPlace(place)}
+                  onSelect={(place) => {
+                    setSelectedPlace(place);
+                    setPickedPoint(null);
+                    if (isValidLatLng({ lat: place.lat, lng: place.lng })) {
+                      focusMapOn({ lat: place.lat, lng: place.lng }, FOCUS_ZOOM);
+                    }
+                  }}
                   inputClassName="bg-surface-container-low"
                 />
 
@@ -72,8 +162,8 @@ export default function LandingPage() {
                     <button
                       key={city.name}
                       type="button"
-                      onClick={() =>
-                        setSelectedPlace({
+                      onClick={() => {
+                        const preset: PlaceResult = {
                           id: `preset-${city.name.toLowerCase()}`,
                           name: city.name,
                           formattedAddress: `${city.name}, ${city.state}, India`,
@@ -82,8 +172,11 @@ export default function LandingPage() {
                           countryCode: 'IN',
                           state: city.state,
                           source: 'curated',
-                        })
-                      }
+                        };
+                        setSelectedPlace(preset);
+                        setPickedPoint(null);
+                        focusMapOn({ lat: city.lat, lng: city.lng }, 11);
+                      }}
                       className="px-2 py-0.5 rounded-full bg-surface-container-high hover:bg-primary/20 hover:text-primary border border-outline-variant text-[11px] font-medium text-on-surface-variant transition-colors"
                     >
                       {city.name}
@@ -246,11 +339,12 @@ export default function LandingPage() {
                   Monsoon Hazard Canvas
                 </h2>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-tertiary/20 text-tertiary border border-tertiary/40">
-                  SIMULATED PREVIEW PINS
+                  LIVE MAPPLS MAP
                 </span>
               </div>
               <p className="text-xs sm:text-sm text-on-surface-variant">
-                Illustrative preview canvas showing sample urban hazard topology. Full spatial coordinates available on interactive Risk Map.
+                Real Mappls vector map. Every pin is plotted from its incident record&apos;s genuine
+                latitude/longitude — seeded demo records are labelled DEMO.
               </p>
             </div>
             <div className="flex items-center gap-3 text-xs">
@@ -266,122 +360,18 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Map Frame Canvas */}
-          <div className="relative w-full h-[460px] rounded-xl overflow-hidden border border-outline-variant bg-[#070e17] shadow-xl select-none">
-            {/* Tactical Grid SVG Canvas */}
-            <svg
-              className="absolute inset-0 w-full h-full opacity-80"
-              preserveAspectRatio="none"
-              viewBox="0 0 1000 500"
-            >
-              <defs>
-                <pattern id="landing-grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                  <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#132235" strokeWidth="0.8" />
-                  <circle cx="40" cy="40" r="1" fill="#1e324d" />
-                </pattern>
-                <linearGradient id="riverGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#0e3a5d" stopOpacity="0.85" />
-                  <stop offset="50%" stopColor="#114b78" stopOpacity="0.95" />
-                  <stop offset="100%" stopColor="#0b2c47" stopOpacity="0.85" />
-                </linearGradient>
-              </defs>
-              <rect width="1000" height="500" fill="url(#landing-grid)" />
-              {/* Rivers */}
-              <path
-                d="M -20,180 C 180,140 320,260 490,240 C 660,220 800,340 1020,310"
-                fill="none"
-                stroke="url(#riverGrad)"
-                strokeWidth="32"
-                strokeLinecap="round"
-              />
-              <path
-                d="M -20,180 C 180,140 320,260 490,240 C 660,220 800,340 1020,310"
-                fill="none"
-                stroke="#2272a8"
-                strokeWidth="3"
-                strokeDasharray="10 5"
-              />
-              {/* Roads */}
-              <line x1="0" y1="120" x2="1000" y2="120" stroke="#1f2f45" strokeWidth="6" />
-              <line x1="0" y1="380" x2="1000" y2="380" stroke="#1f2f45" strokeWidth="6" />
-              <line x1="320" y1="0" x2="320" y2="500" stroke="#1f2f45" strokeWidth="6" />
-              <line x1="720" y1="0" x2="720" y2="500" stroke="#1f2f45" strokeWidth="6" />
-              <path d="M 80,-20 L 640,520" stroke="#253a54" strokeWidth="4" />
-              <path d="M 920,-20 L 420,520" stroke="#253a54" strokeWidth="4" />
-            </svg>
-
-            <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-surface-dim/80 via-transparent to-transparent"></div>
-
-            {/* Interactive Pins (Accessible Buttons F-23) */}
-            {/* Pin 1: High Risk (#FLD-084) */}
-            <button
-              type="button"
-              aria-label="Select critical hazard pin #FLD-084"
-              onClick={() => setActivePinId('#FLD-084')}
-              className="absolute top-[42%] left-[44%] -translate-x-1/2 -translate-y-1/2 group cursor-pointer z-20 focus:outline-none focus-visible:ring-2 focus-visible:ring-error"
-            >
-              <div className="relative flex items-center justify-center">
-                <span className="animate-ping absolute inline-flex h-8 w-8 rounded-full bg-error opacity-40"></span>
-                <div
-                  className={`relative w-8 h-8 rounded-full bg-surface-container-lowest border-2 flex items-center justify-center text-error shadow-xl transition-transform group-hover:scale-110 ${
-                    activePinId === '#FLD-084' ? 'border-error ring-4 ring-error/30' : 'border-error'
-                  }`}
-                >
-                  <span className="material-symbols-outlined text-sm font-bold">report</span>
-                </div>
-              </div>
-            </button>
-
-            {/* Pin 2: High Risk (#FLD-071) */}
-            <button
-              type="button"
-              aria-label="Select critical hazard pin #FLD-071"
-              onClick={() => setActivePinId('#FLD-071')}
-              className="absolute top-[32%] left-[68%] -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group focus:outline-none focus-visible:ring-2 focus-visible:ring-error"
-            >
-              <div className="relative flex items-center justify-center">
-                <span className="animate-ping absolute inline-flex h-6 w-6 rounded-full bg-error opacity-30"></span>
-                <div
-                  className={`w-7 h-7 rounded-full bg-surface-container-lowest border-2 flex items-center justify-center text-error shadow-md transition-transform group-hover:scale-110 ${
-                    activePinId === '#FLD-071' ? 'border-error ring-4 ring-error/30' : 'border-error'
-                  }`}
-                >
-                  <span className="material-symbols-outlined text-xs">warning</span>
-                </div>
-              </div>
-            </button>
-
-            {/* Pin 3: Moderate Risk (#FLD-063) */}
-            <button
-              type="button"
-              aria-label="Select moderate hazard pin #FLD-063"
-              onClick={() => setActivePinId('#FLD-063')}
-              className="absolute top-[65%] left-[30%] -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
-            >
-              <div
-                className={`w-6 h-6 rounded-full bg-surface-container-lowest border-2 border-amber-400 flex items-center justify-center text-amber-400 shadow-md transition-transform group-hover:scale-110 ${
-                  activePinId === '#FLD-063' ? 'ring-4 ring-amber-400/30' : ''
-                }`}
-              >
-                <span className="material-symbols-outlined text-xs">water_loss</span>
-              </div>
-            </button>
-
-            {/* Pin 4: Unverified (#FLD-091) */}
-            <button
-              type="button"
-              aria-label="Select unverified hazard pin #FLD-091"
-              onClick={() => setActivePinId('#FLD-091')}
-              className="absolute top-[60%] left-[75%] -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              <div
-                className={`w-6 h-6 rounded-full bg-surface-container-lowest border-2 border-primary flex items-center justify-center text-primary shadow-sm transition-transform group-hover:scale-110 ${
-                  activePinId === '#FLD-091' ? 'ring-4 ring-primary/30' : ''
-                }`}
-              >
-                <span className="material-symbols-outlined text-[11px]">help</span>
-              </div>
-            </button>
+          {/* Map Frame Canvas — real Mappls interactive vector map */}
+          <div className="relative w-full h-[460px] rounded-xl overflow-hidden border border-outline-variant bg-[#070e17] shadow-xl">
+            <MapplsInteractiveMap
+              center={mapView.center}
+              zoom={mapView.zoom}
+              recenterKey={mapView.recenterKey}
+              markers={incidentMarkers}
+              selectedMarker={pickedPoint}
+              onMapClick={handleMapPointSelect}
+              heightClassName="h-[460px]"
+              ariaLabel="Mappls interactive map of reported hazard locations"
+            />
 
             {/* Floating Overlay Card (Selected Hazard Callout) */}
             <div className="absolute top-4 left-4 max-w-sm w-[calc(100%-2rem)] sm:w-80 bg-surface-container-low/95 backdrop-blur-md border border-outline-variant rounded-xl p-4 shadow-2xl z-30">
@@ -418,9 +408,20 @@ export default function LandingPage() {
               </div>
 
               <div className="mt-2 space-y-2">
-                <div className="font-display font-semibold text-sm text-on-surface">
-                  {selectedIncident.title}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="font-display font-semibold text-sm text-on-surface">
+                    {selectedIncident.title}
+                  </div>
+                  {selectedIncident.provenance === 'demo' && (
+                    <span className="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-amber-400/15 text-amber-300 border border-amber-400/40">
+                      DEMO
+                    </span>
+                  )}
                 </div>
+                <p className="text-[10px] font-mono text-outline">
+                  {selectedIncident.coordinates.lat.toFixed(5)}° N,{' '}
+                  {selectedIncident.coordinates.lng.toFixed(5)}° E
+                </p>
                 <div className="grid grid-cols-2 gap-2 py-2 bg-surface-container rounded-lg px-3 border border-outline-variant/40">
                   <div>
                     <span className="text-[10px] text-on-surface-variant uppercase block">
@@ -466,6 +467,48 @@ export default function LandingPage() {
               </div>
             </div>
 
+            {/* Map-click selection chip — actions carry the genuine picked coordinates */}
+            {pickedPoint && (
+              <div className="absolute top-4 right-4 z-30 w-64 rounded-xl border border-primary/40 bg-surface-container-low/95 p-3 shadow-2xl backdrop-blur-md">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-primary">
+                    Map point selected
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPickedPoint(null)}
+                    className="text-outline hover:text-on-surface p-0.5"
+                    aria-label="Clear selected map point"
+                  >
+                    <span className="material-symbols-outlined text-base">close</span>
+                  </button>
+                </div>
+                <p className="mt-1 text-[11px] font-mono text-on-surface-variant">
+                  {pickedPoint.lat.toFixed(5)}° N, {pickedPoint.lng.toFixed(5)}° E
+                </p>
+                <div className="mt-2 flex items-center gap-2">
+                  <Link
+                    href={`/report-hazard?lat=${pickedPoint.lat}&lng=${pickedPoint.lng}&location=${encodeURIComponent(
+                      `Map point ${pickedPoint.lat.toFixed(5)}, ${pickedPoint.lng.toFixed(5)}`
+                    )}`}
+                    className="inline-flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1 text-[11px] font-semibold text-on-primary hover:bg-primary/90 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-xs">crisis_alert</span>
+                    Report here
+                  </Link>
+                  <Link
+                    href={`/risk-map?lat=${pickedPoint.lat}&lng=${pickedPoint.lng}&label=${encodeURIComponent(
+                      'Selected map point'
+                    )}`}
+                    className="inline-flex items-center gap-1 rounded-lg border border-outline-variant px-2.5 py-1 text-[11px] font-semibold text-on-surface hover:bg-surface-container transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-xs">map</span>
+                    Risk Map
+                  </Link>
+                </div>
+              </div>
+            )}
+
             {/* Floating Map Utility Dock (Bottom Right) */}
             <div className="absolute bottom-4 right-4 hidden sm:flex items-center gap-1 bg-surface-container-low border border-outline-variant rounded-lg p-1 shadow-lg z-20">
               <Link
@@ -477,9 +520,10 @@ export default function LandingPage() {
               </Link>
               <div className="w-px h-5 bg-outline-variant mx-1"></div>
               <button
-                onClick={() => setActivePinId('#FLD-084')}
+                type="button"
+                onClick={handleRecenterMap}
                 className="w-8 h-8 rounded hover:bg-surface-container flex items-center justify-center text-on-surface"
-                title="Recenter"
+                title="Recenter on selected hazard or point"
               >
                 <span className="material-symbols-outlined text-sm">my_location</span>
               </button>
