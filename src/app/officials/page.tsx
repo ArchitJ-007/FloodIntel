@@ -192,7 +192,7 @@ export default function OfficialsDashboardPage() {
                     <span>Under Review</span>
                   </span>
                   <span className="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-semibold bg-[#F59E0B]/20 text-[#F59E0B]">
-                    14
+                    {stats.underReview}
                   </span>
                 </button>
                 <button
@@ -303,19 +303,24 @@ export default function OfficialsDashboardPage() {
               </div>
 
               {/* Guidance Banner */}
-              <div className="rounded-lg bg-surface-container-low border border-outline-variant p-3 flex items-start sm:items-center justify-between gap-3">
+              <div className="rounded-lg bg-surface-container-low border border-outline-variant p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
                   <span className="material-symbols-outlined text-secondary text-base shrink-0">
                     info
                   </span>
                   <p className="text-xs text-on-surface">
-                    <span className="font-semibold text-primary">Status Pipeline:</span> Reported →
-                    Under Review → In Progress → Resolved. All seeded records represent demo test data with [DEMO DATA] provenance labels.
+                    <span className="font-semibold text-primary">Triage Pipeline:</span> Reported →
+                    Under Review → In Progress → Resolved. Demo records carry <span className="font-mono text-secondary">[DEMO DATA]</span> badges; citizen reports start as <span className="font-mono text-amber-300">Unverified</span>.
                   </p>
                 </div>
-                <span className="text-[10px] font-mono text-on-surface-variant bg-surface-container px-2 py-0.5 rounded border border-outline-variant shrink-0 hidden sm:inline">
-                  EDP-9 Active
-                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[10px] font-mono text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">
+                    Session In-Memory Mode
+                  </span>
+                  <span className="text-[10px] font-mono text-on-surface-variant bg-surface-container px-2 py-0.5 rounded border border-outline-variant hidden sm:inline">
+                    EDP-9 Active
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -333,8 +338,8 @@ export default function OfficialsDashboardPage() {
                   {stats.totalToday}
                 </div>
                 <div className="text-xs text-on-surface-variant flex items-center gap-1">
-                  <span className="material-symbols-outlined text-xs text-tertiary">trending_up</span>
-                  <span className="text-tertiary">+14%</span> vs yesterday baseline
+                  <span className="material-symbols-outlined text-xs text-primary">inventory_2</span>
+                  <span>Active triage queue records</span>
                 </div>
               </div>
 
@@ -390,7 +395,7 @@ export default function OfficialsDashboardPage() {
                 </div>
                 <div className="text-xs text-on-surface-variant flex items-center gap-1">
                   <span className="w-2 h-2 rounded-full bg-tertiary"></span>
-                  <span>98.2% road clearance rate</span>
+                  <span>Drainage cleared or traffic reopened</span>
                 </div>
               </div>
             </section>
@@ -475,9 +480,13 @@ export default function OfficialsDashboardPage() {
                         >
                           <td className="py-3.5 px-4 font-mono font-semibold text-primary">
                             <div>{incident.id}</div>
-                            {incident.provenance === 'demo' && (
-                              <span className="text-[9px] uppercase px-1 py-0.2 rounded bg-surface-container text-secondary border border-outline-variant inline-block mt-0.5">
-                                Demo
+                            {incident.provenance === 'demo' ? (
+                              <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-surface-container text-secondary border border-outline-variant inline-block mt-0.5">
+                                [DEMO DATA]
+                              </span>
+                            ) : (
+                              <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 inline-block mt-0.5">
+                                Citizen Report
                               </span>
                             )}
                           </td>
@@ -549,6 +558,29 @@ export default function OfficialsDashboardPage() {
                         </tr>
                       );
                     })}
+                    {filteredList.length === 0 && (
+                      <tr>
+                        <td colSpan={8} className="py-12 text-center text-on-surface-variant">
+                          <div className="flex flex-col items-center justify-center gap-2 max-w-sm mx-auto">
+                            <span className="material-symbols-outlined text-4xl text-outline">search_off</span>
+                            <span className="font-semibold text-sm text-on-surface">No Incidents Found</span>
+                            <span className="text-xs text-outline">
+                              No incident reports match your current search and filter selections.
+                            </span>
+                            <button
+                              onClick={() => {
+                                setSearchQuery('');
+                                setSeverityFilter('all');
+                                setStatusFilter('All');
+                              }}
+                              className="mt-2 px-3 py-1.5 rounded-lg bg-surface-container border border-outline-variant hover:border-primary text-primary text-xs font-semibold transition-colors"
+                            >
+                              Reset All Filters
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -663,8 +695,12 @@ export default function OfficialsDashboardPage() {
                       <span className="material-symbols-outlined text-xs">photo_camera</span>
                       <span>Citizen Photo Evidence</span>
                     </span>
-                    <span className="text-primary text-[11px] hover:underline cursor-pointer">
-                      Verified
+                    <span className="text-secondary text-[11px] font-mono font-medium">
+                      {selectedIncident.verificationStatus === 'verified'
+                        ? 'Verified Ground Truth'
+                        : selectedIncident.provenance === 'demo'
+                        ? '[DEMO DATA]'
+                        : 'Unverified Citizen Submission'}
                     </span>
                   </div>
                   <div className="relative rounded-lg overflow-hidden border border-outline-variant bg-surface-container h-32 group">
@@ -678,9 +714,13 @@ export default function OfficialsDashboardPage() {
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-surface-container-lowest/90 via-transparent to-transparent flex items-end p-2">
                       <div className="flex items-center justify-between w-full text-[11px] text-on-surface">
-                        <span className="flex items-center gap-1 text-tertiary">
-                          <span className="material-symbols-outlined text-xs">check_circle</span>
-                          Metadata Verified
+                        <span className="flex items-center gap-1 text-on-surface-variant">
+                          <span className="material-symbols-outlined text-xs text-secondary">
+                            {selectedIncident.verificationStatus === 'verified' ? 'check_circle' : 'pending'}
+                          </span>
+                          {selectedIncident.verificationStatus === 'verified'
+                            ? 'Official Dispatch Verified'
+                            : 'Awaiting Corroboration'}
                         </span>
                         <span className="font-mono">{selectedIncident.reportedTime}</span>
                       </div>

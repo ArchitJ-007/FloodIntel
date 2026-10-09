@@ -452,6 +452,23 @@ export default function PlanJourneyPage() {
                 </span>
               </div>
 
+              {/* Demo Fallback Advisory Banner */}
+              {routes.some((r) => r.provenance === 'demo_fallback') && (
+                <div className="rounded-xl p-3 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-start gap-2.5">
+                  <span className="material-symbols-outlined text-base mt-0.5 text-amber-400 shrink-0">
+                    science
+                  </span>
+                  <div className="space-y-0.5">
+                    <p className="font-semibold text-xs text-amber-300 uppercase tracking-wider">
+                      Demo Fallback Trajectory Active
+                    </p>
+                    <p className="text-[11px] text-on-surface-variant leading-relaxed">
+                      Public OSRM routing was unreachable, so synthetic demo corridors are displayed. These represent simulated trajectories and are <strong className="text-amber-300">not live driving directions</strong>.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Loading Skeleton */}
               {isCalculating && routes.length === 0 && (
                 <div className="space-y-2">
@@ -506,6 +523,23 @@ export default function PlanJourneyPage() {
 
                       {/* Badge Tags */}
                       <div className="flex items-center gap-1 shrink-0">
+                        {route.provenance === 'demo_fallback' ? (
+                          <span
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40 uppercase tracking-wider"
+                            title="Synthesized demo route - Public OSRM routing was unavailable. Not real driving directions."
+                          >
+                            <span className="material-symbols-outlined text-[10px]">science</span>
+                            DEMO FALLBACK
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 uppercase tracking-wider"
+                            title="Real road network route calculated via OpenStreetMap OSRM"
+                          >
+                            <span className="material-symbols-outlined text-[10px]">satellite_alt</span>
+                            LIVE OSRM
+                          </span>
+                        )}
                         {route.isRecommended && (
                           <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/20 text-primary border border-primary/40 uppercase tracking-wider">
                             <span className="material-symbols-outlined text-[11px]">verified</span>
@@ -660,6 +694,18 @@ export default function PlanJourneyPage() {
               <div className="text-on-surface-variant font-mono">
                 Hazards: <span className={selectedRoute.hazardCount > 0 ? 'text-error font-bold' : 'text-tertiary font-bold'}>{selectedRoute.hazardCount}</span>
               </div>
+              <div className="h-4 w-px bg-outline-variant hidden sm:block"></div>
+              {selectedRoute.provenance === 'demo_fallback' ? (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-mono font-semibold">
+                  <span className="material-symbols-outlined text-[11px]">science</span>
+                  DEMO FALLBACK
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-mono font-semibold">
+                  <span className="material-symbols-outlined text-[11px]">satellite_alt</span>
+                  LIVE OSRM
+                </span>
+              )}
               <div className="h-4 w-px bg-outline-variant hidden sm:block"></div>
               <Link
                 href="/risk-map"

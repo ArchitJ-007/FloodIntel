@@ -95,6 +95,7 @@ interface IncidentContextType {
     description: string;
     reporterMode: string;
     contact?: string;
+    coordinates?: { lat: number; lng: number };
   }) => Incident;
   updateStatus: (id: string, newStatus: StatusType) => void;
   stats: {
@@ -102,6 +103,8 @@ interface IncidentContextType {
     highSeverity: number;
     resolved: number;
     totalToday: number;
+    underReview: number;
+    unverified: number;
   };
 }
 
@@ -345,6 +348,7 @@ export function IncidentProvider({ children }: { children: ReactNode }) {
     description,
     reporterMode,
     contact,
+    coordinates,
   }: {
     location: string;
     hazardType: HazardCategory;
@@ -353,6 +357,7 @@ export function IncidentProvider({ children }: { children: ReactNode }) {
     description: string;
     reporterMode: string;
     contact?: string;
+    coordinates?: { lat: number; lng: number };
   }) => {
     const randomNum = Math.floor(100 + Math.random() * 900);
     const newId = `#FLD-2025-${randomNum}`;
@@ -419,8 +424,8 @@ export function IncidentProvider({ children }: { children: ReactNode }) {
       warnings: riskResult.warnings,
       notes: description,
       coordinates: {
-        lat: 12.935 + (Math.random() - 0.5) * 0.02,
-        lng: 77.62 + (Math.random() - 0.5) * 0.02,
+        lat: coordinates?.lat ?? 12.935 + (Math.random() - 0.5) * 0.02,
+        lng: coordinates?.lng ?? 77.62 + (Math.random() - 0.5) * 0.02,
         xPercent: 35 + Math.floor(Math.random() * 45),
         yPercent: 35 + Math.floor(Math.random() * 45),
       },
@@ -454,7 +459,9 @@ export function IncidentProvider({ children }: { children: ReactNode }) {
     (i) => i.severity === 'high' && i.status !== 'Resolved'
   ).length;
   const resolved = incidents.filter((i) => i.status === 'Resolved').length;
-  const totalToday = 80 + incidents.length;
+  const totalToday = incidents.length;
+  const underReview = incidents.filter((i) => i.status === 'Under Review').length;
+  const unverified = incidents.filter((i) => i.verificationStatus === 'unverified').length;
 
   return (
     <IncidentContext.Provider
@@ -465,10 +472,12 @@ export function IncidentProvider({ children }: { children: ReactNode }) {
         addHazard,
         updateStatus,
         stats: {
-          activeHazards: activeHazards || 42,
-          highSeverity: highSeverity || 7,
-          resolved: resolved + 124,
+          activeHazards,
+          highSeverity,
+          resolved,
           totalToday,
+          underReview,
+          unverified,
         },
       }}
     >

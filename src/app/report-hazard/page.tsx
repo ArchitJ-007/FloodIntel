@@ -5,9 +5,14 @@ import Link from 'next/link';
 import { TopNavBar } from '@/components/TopNavBar';
 import { Footer } from '@/components/Footer';
 import { useIncidents, HazardCategory, SeverityType } from '@/context/IncidentContext';
+import {
+  validateHazardReport,
+  detectDuplicateReport,
+  DuplicateMatchInfo,
+} from '@/lib/reportingValidation';
 
 export default function ReportHazardPage() {
-  const { addHazard } = useIncidents();
+  const { addHazard, incidents } = useIncidents();
 
   // Form states
   const [location, setLocation] = useState('4th Cross Rd & 80ft Road Junction, Koramangala');
@@ -86,30 +91,123 @@ export default function ReportHazardPage() {
     }
   };
 
-  // Submission state
+  // Submission & Validation state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdIncidentId, setCreatedIncidentId] = useState<string | null>(null);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [generalError, setGeneralError] = useState<string | null>(null);
+  const [possibleDuplicate, setPossibleDuplicate] = useState<DuplicateMatchInfo | null>(null);
+
+  const submitReport = async (overrideDuplicate = false) => {
+    setErrors({});
+    setGeneralError(null);
+    setIsSubmitting(true);
+
+    // Derive coordinates from mini map pin position
+    const lat = Number((12.9352 + (50 - pinPosition.y) * 0.0004).toFixed(5));
+    const lng = Number((77.6245 + (pinPosition.x - 50) * 0.0004).toFixed(5));
+
+    // 1. Client-Side Validation
+    const clientValidation = validateHazardReport({
+      location,
+      hazardType,
+      severity,
+      waterDepth,
+      description,
+      reporterMode,
+      contact,
+      coordinates: { lat, lng },
+    });
+
+    if (!clientValidation.isValid) {
+      setErrors(clientValidation.errors);
+      setIsSubmitting(false);
+      return;
+    }
+
+    // 2. Duplicate Detection Check
+    if (!overrideDuplicate) {
+      const dupCheck = detectDuplicateReport(
+        {
+          coordinates: { lat, lng },
+          hazardType,
+          description,
+          location,
+        },
+        incidents
+      );
+
+      if (dupCheck.isDuplicateCandidate && dupCheck.match) {
+        setPossibleDuplicate(dupCheck.match);
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    // 3. Server-Side Validation Endpoint Check
+    try {
+      const res = await fetch('/api/reports/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: clientValidation.sanitized!.location,
+          hazardType,
+          severity,
+          waterDepth,
+          description: clientValidation.sanitized!.description,
+          reporterMode,
+          contact,
+          coordinates: { lat, lng },
+          activeIncidents: incidents,
+        }),
+      });
+
+      const serverResult = await res.json();
+      if (!res.ok) {
+        if (serverResult.fieldErrors) {
+          setErrors(serverResult.fieldErrors);
+        } else {
+          setGeneralError(serverResult.error || 'Server validation failed.');
+        }
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (
+        !overrideDuplicate &&
+        serverResult.duplicateCheck?.isDuplicateCandidate &&
+        serverResult.duplicateCheck.match
+      ) {
+        setPossibleDuplicate(serverResult.duplicateCheck.match);
+        setIsSubmitting(false);
+        return;
+      }
+    } catch (e) {
+      console.warn('Server validation check unavailable, proceeding with verified client validation:', e);
+    }
+
+    // 4. Register Incident in IncidentContext
+    const incident = addHazard({
+      location: clientValidation.sanitized!.location,
+      hazardType,
+      severity,
+      waterDepth,
+      description: clientValidation.sanitized!.description,
+      reporterMode,
+      contact: reporterMode === 'notify' ? contact : undefined,
+      coordinates: { lat, lng },
+    });
+
+    setCreatedIncidentId(incident.id);
+    setPossibleDuplicate(null);
+    setIsSubmitting(false);
+    setShowSuccessToast(true);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
-
-    setTimeout(() => {
-      const incident = addHazard({
-        location,
-        hazardType,
-        severity,
-        waterDepth,
-        description,
-        reporterMode,
-        contact: reporterMode === 'notify' ? contact : undefined,
-      });
-
-      setCreatedIncidentId(incident.id);
-      setIsSubmitting(false);
-      setShowSuccessToast(true);
-    }, 700);
+    submitReport(false);
   };
 
   const handleUseGps = () => {
@@ -253,6 +351,12 @@ export default function ReportHazardPage() {
                     className="w-full bg-[#122131] border border-[#222F44] rounded-lg pl-9 pr-4 py-2 text-xs sm:text-sm text-on-surface placeholder-outline focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
                   />
                 </div>
+                {errors.location && (
+                  <p className="text-xs text-error mt-1 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-xs">error</span>
+                    <span>{errors.location}</span>
+                  </p>
+                )}
               </div>
 
               {/* Mini Interactive Map Pin Selector Container */}
@@ -564,6 +668,12 @@ export default function ReportHazardPage() {
                   <span>Be specific about direction of travel and blocked choke points.</span>
                   <span className="font-mono">{description.length} / 500 characters</span>
                 </div>
+                {errors.description && (
+                  <p className="text-xs text-error mt-1 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-xs">error</span>
+                    <span>{errors.description}</span>
+                  </p>
+                )}
 
                 {/* AI Assistant Classification Trigger & Suggestion Card */}
                 <div className="pt-2">
@@ -771,6 +881,56 @@ export default function ReportHazardPage() {
               </div>
             </section>
 
+            {/* General Server/Validation Error Banner */}
+            {generalError && (
+              <div className="p-3 rounded-lg bg-error/15 border border-error/40 text-xs text-error flex items-center gap-2">
+                <span className="material-symbols-outlined text-sm shrink-0">error</span>
+                <span>{generalError}</span>
+              </div>
+            )}
+
+            {/* Possible Duplicate Warning Card */}
+            {possibleDuplicate && (
+              <div className="p-4 rounded-xl bg-amber-500/10 border-2 border-amber-500/40 text-xs space-y-3 animate-in fade-in">
+                <div className="flex items-start gap-2.5">
+                  <span className="material-symbols-outlined text-amber-400 text-xl shrink-0 mt-0.5">
+                    warning
+                  </span>
+                  <div className="space-y-1 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-amber-400 uppercase tracking-wide">
+                        Possible Duplicate Report Identified
+                      </h4>
+                      <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300">
+                        {possibleDuplicate.id}
+                      </span>
+                    </div>
+                    <p className="text-on-surface leading-relaxed">
+                      A similar active report (<strong>{possibleDuplicate.title}</strong>) was recorded at {possibleDuplicate.location} approximately {possibleDuplicate.minutesAgo} minutes ago within {possibleDuplicate.distanceM} meters ({possibleDuplicate.reason}).
+                    </p>
+                    <p className="text-on-surface-variant text-[11px]">
+                      To maintain dispatch clarity, please review if this describes the same waterlogging or represents a distinct obstruction.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-amber-500/20">
+                  <Link
+                    href="/risk-map"
+                    className="px-3 py-1.5 rounded-lg bg-surface-container border border-outline-variant hover:border-primary text-primary font-semibold text-xs transition-colors"
+                  >
+                    Review Existing on Map
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => submitReport(true)}
+                    className="px-3 py-1.5 rounded-lg bg-amber-400 text-black font-bold text-xs hover:bg-amber-300 transition-colors shadow-sm"
+                  >
+                    Submit Distinct Hazard Observation Anyway
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* ================= SUBMISSION FOOTER ================= */}
             <div className="pt-4 border-t border-[#222F44] flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-2 text-tertiary text-xs font-medium">
@@ -780,7 +940,7 @@ export default function ReportHazardPage() {
                 >
                   check_circle
                 </span>
-                <span>All required fields completed. Ready for dispatch ingestion.</span>
+                <span>Citizen report is verified client-side before dispatch ingestion.</span>
               </div>
 
               <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -795,8 +955,10 @@ export default function ReportHazardPage() {
                   disabled={isSubmitting}
                   className="w-1/2 sm:w-auto px-7 py-2.5 rounded-lg bg-primary text-on-primary hover:bg-opacity-95 font-display text-xs sm:text-sm font-bold tracking-wide shadow-lg shadow-primary/10 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  <span className="material-symbols-outlined text-base">send</span>
-                  <span>{isSubmitting ? 'Ingesting Report...' : 'Submit Report'}</span>
+                  <span className={`material-symbols-outlined text-base ${isSubmitting ? 'animate-spin' : ''}`}>
+                    {isSubmitting ? 'sync' : 'send'}
+                  </span>
+                  <span>{isSubmitting ? 'Validating & Ingesting...' : 'Submit Report'}</span>
                 </button>
               </div>
             </div>
