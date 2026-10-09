@@ -280,28 +280,56 @@ export async function searchPlacesIndia(query: string): Promise<PlaceResult[]> {
   const matchedCurated = searchCuratedLandmarks(trimmed);
   results.push(...matchedCurated);
 
-  // 2. If MAPPLS_API_KEY is configured, try Mappls
+  // 2. If MAPPLS_API_KEY is configured, try Mappls Autosuggest API
   const mapplsKey = process.env.MAPPLS_API_KEY;
-  if (mapplsKey) {
+  if (mapplsKey && mapplsKey.trim() !== '' && mapplsKey !== 'your_mappls_api_key_here') {
     try {
-      const mapplsUrl = `https://atlas.mappls.com/api/places/geocode?address=${encodeURIComponent(
-        trimmed
-      )}&itemCount=5`;
-      const res = await fetch(mapplsUrl, {
-        headers: { Authorization: `Bearer ${mapplsKey}` },
+      // Use URLSearchParams for safe query construction with access_token
+      const autoSuggestParams = new URLSearchParams({
+        query: trimmed,
+        access_token: mapplsKey.trim(),
+      });
+      const autoSuggestUrl = `https://atlas.mappls.com/api/places/search/json?${autoSuggestParams.toString()}`;
+
+      const res = await fetch(autoSuggestUrl, {
+        headers: { Accept: 'application/json' },
         signal: AbortSignal.timeout(4000),
       });
+
       if (res.ok) {
         const data = await res.json();
-        const copResults = data?.copResults || [];
-        for (const item of copResults) {
-          const lat = Number(item.latitude);
-          const lng = Number(item.longitude);
+        const suggestions = Array.isArray(data?.suggestedLocations) ? data.suggestedLocations : [];
+
+        for (const item of suggestions) {
+          let lat = Number(item.latitude);
+          let lng = Number(item.longitude);
+
+          // If coordinates are missing on suggestion, attempt eLoc/geocode resolution
+          if ((isNaN(lat) || isNaN(lng) || lat === 0) && item.eLoc) {
+            try {
+              const elocParams = new URLSearchParams({ access_token: mapplsKey.trim() });
+              const elocUrl = `https://atlas.mappls.com/api/places/eloc/${encodeURIComponent(item.eLoc)}?${elocParams.toString()}`;
+              const elocRes = await fetch(elocUrl, {
+                headers: { Accept: 'application/json' },
+                signal: AbortSignal.timeout(2000),
+              });
+              if (elocRes.ok) {
+                const elocData = await elocRes.json();
+                lat = Number(elocData?.latitude ?? elocData?.lat);
+                lng = Number(elocData?.longitude ?? elocData?.lng);
+              }
+            } catch {
+              // Resolution failed; omit or proceed if fallback exists
+            }
+          }
+
           if (isCoordinatesInIndia(lat, lng)) {
+            const name = item.placeName || item.placeAddress || trimmed;
+            const formattedAddress = item.placeAddress || item.placeName || `${trimmed}, India`;
             results.push({
-              id: item.eLoc || `mappls-${lat}-${lng}`,
-              name: item.placeName || item.formattedAddress || trimmed,
-              formattedAddress: item.formattedAddress || item.placeName || `${trimmed}, India`,
+              id: item.eLoc ? `mappls-${item.eLoc}` : `mappls-${lat}-${lng}`,
+              name,
+              formattedAddress,
               lat,
               lng,
               countryCode: 'IN',

@@ -138,7 +138,10 @@ function PlanJourneyContent() {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to calculate candidate routes.');
+        setCalculationError(data.error || 'Failed to calculate candidate routes.');
+        setRoutes([]);
+        setIsCalculating(false);
+        return;
       }
 
       const result = data as RouteComparisonResult;
@@ -150,12 +153,12 @@ function PlanJourneyContent() {
       // Fetch AI route comparison summary
       fetchAiRouteSummary(result.routes);
     } catch (err: any) {
-      console.error('[Plan Journey] Route calculation error:', err);
       setCalculationError(err.message || 'Routing service is temporarily unavailable.');
+      setRoutes([]);
     } finally {
       setIsCalculating(false);
     }
-  }, [originCoords, destCoords, travelMode, incidents]);
+  }, [originCoords, destCoords, travelMode, incidents, fetchAiRouteSummary]);
 
   const fetchAiRouteSummary = useCallback(
     async (candidateRoutes: RouteOption[]) => {

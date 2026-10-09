@@ -453,33 +453,47 @@ async function callGeminiStructured<T>(
   const client = getGenAIClient();
   if (!client) return null;
 
-  const model = modelOverride || process.env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL;
+  const primaryModel = modelOverride || process.env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL;
+  const candidateModels = [
+    primaryModel,
+    'gemini-flash-latest',
+    'gemini-3.8-flash',
+  ].filter((m, i, arr) => arr.indexOf(m) === i);
 
-  try {
-    // 8-second timeout enforcement per PRD FR-AI-13
-    const timeoutPromise = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error('Gemini API timeout (8s limit exceeded)')), 8000)
-    );
+  for (const model of candidateModels) {
+    try {
+      // 8-second timeout enforcement per PRD FR-AI-13
+      const timeoutPromise = new Promise<null>((_, reject) =>
+        setTimeout(() => reject(new Error('Gemini API timeout (8s limit exceeded)')), 8000)
+      );
 
-    const callPromise = client.models.generateContent({
-      model,
-      contents: prompt,
-      config: {
-        systemInstruction,
-        responseMimeType: 'application/json',
-        temperature: 0.2, // Low temperature for factual consistency (PRD FR-AI-01)
-      },
-    });
+      const callPromise = client.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+          systemInstruction,
+          responseMimeType: 'application/json',
+          temperature: 0.2, // Low temperature for factual consistency (PRD FR-AI-01)
+        },
+      });
 
-    const response = (await Promise.race([callPromise, timeoutPromise])) as any;
-    if (!response || !response.text) return null;
+      const response = (await Promise.race([callPromise, timeoutPromise])) as any;
+      if (!response || !response.text) continue;
 
-    const parsed = JSON.parse(response.text.trim()) as T;
-    return { data: parsed, model };
-  } catch (error) {
-    console.warn('[FloodIntel Gemini AI] Falling back to deterministic template due to:', (error as Error).message);
-    return null;
+      const parsed = JSON.parse(response.text.trim()) as T;
+      return { data: parsed, model };
+    } catch (error) {
+      const msg = (error as Error).message || '';
+      // If 404 / NOT_FOUND, try next candidate model
+      if (msg.includes('404') || msg.includes('NOT_FOUND') || msg.includes('not found')) {
+        continue;
+      }
+      console.warn('[FloodIntel Gemini AI] Falling back to deterministic template due to:', msg);
+      return null;
+    }
   }
+
+  return null;
 }
 
 // ------------------------------------------------------------------------------
