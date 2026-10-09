@@ -8,7 +8,7 @@ import { StatusBadge } from '@/components/StatusBadge';
 import { useIncidents, StatusType, SeverityType } from '@/context/IncidentContext';
 
 export default function OfficialsDashboardPage() {
-  const { incidents, selectedIncident, setSelectedIncidentId, updateStatus, stats } = useIncidents();
+  const { incidents, selectedIncident, setSelectedIncidentId, updateStatus, verifyIncident, stats } = useIncidents();
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -117,6 +117,19 @@ export default function OfficialsDashboardPage() {
           </div>
         </div>
       </header>
+ 
+       {/* F-19: Unauthenticated Municipal Console Warning Banner */}
+       <div className="bg-amber-500/15 border-b border-amber-500/30 px-4 md:px-6 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-200">
+         <div className="flex items-center gap-2">
+           <span className="material-symbols-outlined text-base text-amber-400 shrink-0">security</span>
+           <span>
+             <strong className="text-amber-300">DEMO ONLY — NOT AN AUTHENTICATED MUNICIPAL CONSOLE:</strong> Prototype review console. Incident verification and triage actions are persisted locally on this device only and do not trigger municipal emergency dispatches.
+           </span>
+         </div>
+         <span className="text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/40 uppercase whitespace-nowrap self-start sm:self-auto">
+           UNAUTHENTICATED PREVIEW
+         </span>
+       </div>
 
       {/* Action toast notice */}
       {actionNotice && (
@@ -326,20 +339,22 @@ export default function OfficialsDashboardPage() {
 
             {/* Summary Metric Cards (Grid of 4) */}
             <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4">
-              {/* Card 1: Total Reports Today */}
+              {/* Card 1: Total Indexed Records */}
               <div className="bg-surface-container-low border border-outline-variant rounded-xl p-4 flex flex-col justify-between shadow-sm">
                 <div className="flex items-center justify-between text-on-surface-variant mb-2">
                   <span className="text-[11px] font-semibold uppercase tracking-wider">
-                    Total Reports Today
+                    Total Indexed Records
                   </span>
                   <span className="material-symbols-outlined text-primary text-xl">analytics</span>
                 </div>
                 <div className="text-3xl font-display font-bold text-on-surface leading-none mb-1 tabular-nums font-mono">
-                  {stats.totalToday}
+                  {incidents.length}
                 </div>
                 <div className="text-xs text-on-surface-variant flex items-center gap-1">
                   <span className="material-symbols-outlined text-xs text-primary">inventory_2</span>
-                  <span>Active triage queue records</span>
+                  <span>
+                    {incidents.filter((i) => i.provenance !== 'demo').length} citizen • {incidents.filter((i) => i.provenance === 'demo').length} demo
+                  </span>
                 </div>
               </div>
 
@@ -684,7 +699,9 @@ export default function OfficialsDashboardPage() {
                   </p>
                   <div className="mt-2 text-[11px] text-on-surface-variant flex items-center justify-between border-t border-outline-variant/40 pt-1.5">
                     <span>Source: {selectedIncident.reportedBy}</span>
-                    <span className="text-secondary font-mono">GPS: ±3m</span>
+                    <span className="text-outline font-mono">
+                      {selectedIncident.provenance === 'user' ? 'Accuracy: Not provided' : 'Coordinates: Curated Demo'}
+                    </span>
                   </div>
                 </div>
 
@@ -697,65 +714,76 @@ export default function OfficialsDashboardPage() {
                     </span>
                     <span className="text-secondary text-[11px] font-mono font-medium">
                       {selectedIncident.verificationStatus === 'verified'
-                        ? 'Verified Ground Truth'
+                        ? 'Demo verification — local only'
                         : selectedIncident.provenance === 'demo'
                         ? '[DEMO DATA]'
                         : 'Unverified Citizen Submission'}
                     </span>
                   </div>
-                  <div className="relative rounded-lg overflow-hidden border border-outline-variant bg-surface-container h-32 group">
-                    <img
-                      src={
-                        selectedIncident.photoUrl ||
-                        'https://lh3.googleusercontent.com/aida-public/AB6AXuB4xvob4_W1KZZSIGXvE6ahccdax5dGCvzadmJw-mV9y3ZwunYl90mRCbpZInLEpTecAgJOry-YC0Vb09pehQ-hRhZCO5rTfYV-3-NhJ7I-SEGyF3sEU1SuJfhRQU3hr3cjUqIpto8ZvyGE4Oy5vjm7EFVfJmeEO0D7jZVDGDm3VTxMjOJzgpHlH3C8YO9zHDZ4pf01T1D9TzBmTkdWXE9iqS4_BGrlvJaR3oCYufEDCOJ-4dINGR6A'
-                      }
-                      alt="Flooded underpass photo evidence"
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-surface-container-lowest/90 via-transparent to-transparent flex items-end p-2">
-                      <div className="flex items-center justify-between w-full text-[11px] text-on-surface">
-                        <span className="flex items-center gap-1 text-on-surface-variant">
-                          <span className="material-symbols-outlined text-xs text-secondary">
-                            {selectedIncident.verificationStatus === 'verified' ? 'check_circle' : 'pending'}
+                  {selectedIncident.photoUrl ? (
+                    <div className="relative rounded-lg overflow-hidden border border-outline-variant bg-surface-container h-32 group">
+                      <img
+                        src={selectedIncident.photoUrl}
+                        alt="Citizen hazard photo evidence"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-surface-container-lowest/90 via-transparent to-transparent flex items-end p-2">
+                        <div className="flex items-center justify-between w-full text-[11px] text-on-surface">
+                          <span className="flex items-center gap-1 text-on-surface-variant">
+                            <span className="material-symbols-outlined text-xs text-secondary">
+                              {selectedIncident.verificationStatus === 'verified' ? 'check_circle' : 'pending'}
+                            </span>
+                            {selectedIncident.verificationStatus === 'verified'
+                              ? 'Demo verification — local only'
+                              : 'Awaiting Corroboration'}
                           </span>
-                          {selectedIncident.verificationStatus === 'verified'
-                            ? 'Official Dispatch Verified'
-                            : 'Awaiting Corroboration'}
-                        </span>
-                        <span className="font-mono">{selectedIncident.reportedTime}</span>
+                          <span className="font-mono">{selectedIncident.reportedTime}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="rounded-lg border border-outline-variant bg-surface-container/60 h-24 flex flex-col items-center justify-center text-outline gap-1 text-xs">
+                      <span className="material-symbols-outlined text-2xl text-on-surface-variant/40">no_photography</span>
+                      <span className="text-on-surface-variant/70 font-medium">No photo attached</span>
+                    </div>
+                  )}
                 </div>
 
-                {/* Sensor Telemetry Verification Cross-Check */}
+                {/* Sensor Telemetry Status (Honest Disclosures) */}
                 <div className="bg-surface-container/60 rounded-lg p-3 border border-outline-variant">
-                  <div className="text-[10px] font-semibold text-on-surface-variant uppercase tracking-wider mb-2 flex items-center gap-1">
-                    <span className="material-symbols-outlined text-xs text-secondary">sensors</span>
-                    <span>Automated Telemetry Cross-Check</span>
+                  <div className="text-[10px] font-semibold text-on-surface-variant uppercase tracking-wider mb-2 flex items-center justify-between">
+                    <span className="flex items-center gap-1">
+                      <span className="material-symbols-outlined text-xs text-secondary">sensors</span>
+                      <span>Sensor Telemetry Cross-Check</span>
+                    </span>
+                    <span className="text-[9px] font-mono px-1 rounded bg-surface-container text-outline border border-outline-variant">
+                      NO HARDWARE SENSOR
+                    </span>
                   </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="p-2 rounded bg-surface-container border border-outline-variant">
-                      <div className="text-[10px] text-on-surface-variant">Gauge Node #42</div>
-                      <div className="font-display font-bold text-error text-sm">
-                        {selectedIncident.depth}
-                      </div>
-                      <div className="text-[10px] text-error">Critical Water Level</div>
+                  <div className="p-2.5 rounded bg-surface-container border border-outline-variant/60 text-xs text-on-surface-variant space-y-1.5">
+                    <div className="flex items-center justify-between font-mono text-[11px]">
+                      <span className="text-outline">Gauge Telemetry:</span>
+                      <span className="text-amber-300">No sensor attached</span>
                     </div>
-                    <div className="p-2 rounded bg-surface-container border border-outline-variant">
-                      <div className="text-[10px] text-on-surface-variant">Flow Velocity</div>
-                      <div className="font-display font-bold text-secondary text-sm">
-                        {selectedIncident.flowVelocity || '3.8 m/s'}
-                      </div>
-                      <div className="text-[10px] text-secondary">Surging North</div>
+                    <div className="flex items-center justify-between font-mono text-[11px]">
+                      <span className="text-outline">Reported Water Depth:</span>
+                      <span className="font-bold text-on-surface">{selectedIncident.depth}</span>
+                    </div>
+                    <div className="text-[10px] text-outline pt-1 border-t border-outline-variant/40">
+                      Physical IoT gauge integration requires municipal sensor gateway access.
                     </div>
                   </div>
                 </div>
 
                 {/* Status History Timeline */}
                 <div>
-                  <div className="text-[10px] font-semibold text-on-surface-variant uppercase tracking-wider mb-2">
-                    Status History Timeline
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] font-semibold text-on-surface-variant uppercase tracking-wider">
+                      Status History Timeline
+                    </span>
+                    <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-surface-container text-outline border border-outline-variant">
+                      AUDIT LOG
+                    </span>
                   </div>
                   <div className="relative pl-5 space-y-3 before:absolute before:left-1.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-outline-variant">
                     <div className="relative">
@@ -774,13 +802,13 @@ export default function OfficialsDashboardPage() {
                     <div className="relative">
                       <span className="absolute -left-5 top-1 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-surface-container-low"></span>
                       <div className="text-[10px] font-mono font-semibold text-primary">
-                        +5m Telemetry Ingest
+                        Risk Evaluated
                       </div>
                       <div className="text-xs font-medium text-on-surface">
-                        Triaged by Sensor Telemetry
+                        Calculated Score: {selectedIncident.riskScore ?? 'N/A'}/100 ({selectedIncident.riskCategory} risk)
                       </div>
                       <div className="text-[10px] text-on-surface-variant">
-                        Node depth verified {selectedIncident.depth}.
+                        Evaluated via deterministic hydrologic risk engine.
                       </div>
                     </div>
 
@@ -793,7 +821,9 @@ export default function OfficialsDashboardPage() {
                         Status: {selectedIncident.status}
                       </div>
                       <div className="text-[10px] text-on-surface-variant">
-                        Assigned to Operator Doe (Sector 4).
+                        {selectedIncident.verificationStatus === 'verified'
+                          ? 'Demo verification recorded locally on this device.'
+                          : 'Unverified report awaiting confirmation.'}
                       </div>
                     </div>
                   </div>
@@ -804,13 +834,14 @@ export default function OfficialsDashboardPage() {
               <div className="p-4 border-t border-outline-variant bg-surface-container-lowest space-y-2">
                 <button
                   onClick={() => {
+                    verifyIncident(selectedIncident.id, 'verified');
                     updateStatus(selectedIncident.id, 'In Progress');
-                    showNotice(`${selectedIncident.id} confirmed & triaged!`);
+                    showNotice(`${selectedIncident.id} verified locally (Demo verification — local only)!`);
                   }}
                   className="w-full py-2 px-3 rounded-lg bg-primary hover:bg-opacity-90 text-on-primary font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
                 >
-                  <span className="material-symbols-outlined text-base">check_circle</span>
-                  <span>Confirm & Verify Incident</span>
+                  <span className="material-symbols-outlined text-base">verified</span>
+                  <span>Confirm & Verify (Demo Local Verification)</span>
                 </button>
                 <div className="grid grid-cols-2 gap-2">
                   <button

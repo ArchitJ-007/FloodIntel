@@ -344,7 +344,7 @@ export function IncidentProvider({ children }: { children: ReactNode }) {
   const [selectedIncidentId, setSelectedIncidentId] = useState<string>('#FLD-084');
 
   // Hydrate user reports from browser localStorage safely after initial client mount
-  useEffect(() => {
+  React.useEffect(() => {
     try {
       if (typeof window !== 'undefined') {
         const stored = window.localStorage.getItem(LOCAL_STORAGE_REPORTS_KEY);

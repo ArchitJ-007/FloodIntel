@@ -205,40 +205,56 @@ export function TopNavBar() {
           <div className="absolute top-16 right-4 sm:right-32 w-80 sm:w-96 bg-surface-container-low border border-outline-variant rounded-xl shadow-2xl p-4 z-50 animate-in fade-in slide-in-from-top-2">
             <div className="flex items-center justify-between pb-2 border-b border-outline-variant mb-3">
               <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-secondary text-lg">sensors</span>
-                <span className="text-sm font-semibold text-on-surface">Telemetry Gateway Online</span>
+                <span className="material-symbols-outlined text-secondary text-lg">hub</span>
+                <span className="text-sm font-semibold text-on-surface">Data Sources & Telemetry</span>
               </div>
-              <span className="text-[11px] font-mono text-tertiary">142 STATIONS</span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-tertiary/20 text-tertiary border border-tertiary/30 font-bold">
+                API BACKED
+              </span>
             </div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
+
+            {/* Truthful Live App Metrics */}
+            <div className="grid grid-cols-2 gap-2 text-xs mb-3">
               <div className="p-2.5 rounded-lg bg-surface border border-outline-variant">
-                <span className="text-[10px] uppercase text-outline block">ST-402 Basin Gauge</span>
-                <span className="text-sm font-mono font-bold text-secondary">2.45 ft</span>
-                <span className="text-[10px] text-error block mt-0.5">Surging +0.3 ft/hr</span>
+                <span className="text-[10px] uppercase text-outline block">Reports In Memory</span>
+                <span className="text-sm font-mono font-bold text-secondary">{incidents.length} Records</span>
+                <span className="text-[10px] text-tertiary block mt-0.5">Hydrated & Local</span>
               </div>
               <div className="p-2.5 rounded-lg bg-surface border border-outline-variant">
-                <span className="text-[10px] uppercase text-outline block">Canal Outflow RV-12</span>
-                <span className="text-sm font-mono font-bold text-amber-400">3.8 m/s</span>
-                <span className="text-[10px] text-amber-400 block mt-0.5">High Discharge</span>
+                <span className="text-[10px] uppercase text-outline block">Weather Engine</span>
+                <span className="text-sm font-mono font-bold text-primary">Open-Meteo</span>
+                <span className="text-[10px] text-primary block mt-0.5">Live Meteorological</span>
               </div>
               <div className="p-2.5 rounded-lg bg-surface border border-outline-variant">
-                <span className="text-[10px] uppercase text-outline block">Precipitation Radar</span>
-                <span className="text-sm font-mono font-bold text-primary">42 mm/hr</span>
-                <span className="text-[10px] text-primary block mt-0.5">Sector 4 Heavy</span>
+                <span className="text-[10px] uppercase text-outline block">Place Search</span>
+                <span className="text-sm font-mono font-bold text-on-surface">Mappls + Curated</span>
+                <span className="text-[10px] text-on-surface-variant block mt-0.5">India-wide coverage</span>
               </div>
               <div className="p-2.5 rounded-lg bg-surface border border-outline-variant">
-                <span className="text-[10px] uppercase text-outline block">Ingest Latency</span>
-                <span className="text-sm font-mono font-bold text-tertiary">410 ms</span>
-                <span className="text-[10px] text-tertiary block mt-0.5">Optimal Consensus</span>
+                <span className="text-[10px] uppercase text-outline block">Route Analysis</span>
+                <span className="text-sm font-mono font-bold text-tertiary">OSRM + Turf.js</span>
+                <span className="text-[10px] text-tertiary block mt-0.5">Real road geometry</span>
               </div>
             </div>
+
+            {/* Illustrative Simulation Notice */}
+            <div className="p-2 rounded-lg bg-surface-container border border-outline-variant/60 text-[11px] text-on-surface-variant space-y-1">
+              <div className="flex items-center gap-1 font-semibold text-outline text-[10px] uppercase">
+                <span className="material-symbols-outlined text-xs">info</span>
+                <span>Hydrologic Sensor Notice</span>
+              </div>
+              <p className="text-[10px] leading-relaxed">
+                Municipal depth gauge feeds (ST-402, RV-12) are simulated demo fixtures. Physical IoT gauges require municipal telemetry API access.
+              </p>
+            </div>
+
             <div className="mt-3 pt-2 border-t border-outline-variant text-right">
               <Link
                 href="/officials"
                 onClick={() => setSensorsOpen(false)}
                 className="text-xs text-primary font-medium hover:underline"
               >
-                Go to Officials Command Ops →
+                Open Officials Command Portal →
               </Link>
             </div>
           </div>

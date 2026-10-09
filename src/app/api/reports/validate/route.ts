@@ -5,6 +5,7 @@ import {
   HazardReportInput,
 } from '@/lib/reportingValidation';
 import { getInitialDemoIncidents } from '@/lib/demoIncidents';
+import { checkRateLimit, getClientIp, sanitizeErrorMessage } from '@/lib/rateLimit';
 
 // ==============================================================================
 // POST /api/reports/validate
@@ -13,6 +14,23 @@ import { getInitialDemoIncidents } from '@/lib/demoIncidents';
 
 export async function POST(req: NextRequest) {
   try {
+    const ip = getClientIp(req);
+    const rate = checkRateLimit(ip, 'reports_validate', { limit: 60, windowMs: 60000 });
+    if (!rate.success) {
+      return NextResponse.json(
+        { error: 'Validation rate limit exceeded. Please slow down.', retryAfterMs: rate.resetMs },
+        { status: 429, headers: { 'Retry-After': String(Math.ceil(rate.resetMs / 1000)) } }
+      );
+    }
+
+    const contentLength = req.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > 131072) {
+      return NextResponse.json(
+        { error: 'Request body exceeds maximum allowed size (128KB).' },
+        { status: 413 }
+      );
+    }
+
     let body: any;
     try {
       body = await req.json();
@@ -62,9 +80,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Perform duplicate check against existing incidents
+    // 2. Perform duplicate check against existing incidents (bounded to 100)
     const existingIncidents = Array.isArray(body.activeIncidents)
-      ? body.activeIncidents
+      ? body.activeIncidents.slice(0, 100)
       : getInitialDemoIncidents();
 
     const duplicateCheck = detectDuplicateReport(
@@ -87,7 +105,7 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     console.error('Error in /api/reports/validate:', err);
     return NextResponse.json(
-      { error: 'Internal server error validating hazard report.' },
+      { error: sanitizeErrorMessage(err, 'Internal server error validating hazard report.') },
       { status: 500 }
     );
   }

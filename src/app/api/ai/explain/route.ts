@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { explainRisk, ExplainRiskInput } from '@/lib/gemini';
+import { checkRateLimit, getClientIp, sanitizeErrorMessage } from '@/lib/rateLimit';
 
 // ==============================================================================
 // POST /api/ai/explain
@@ -8,7 +9,32 @@ import { explainRisk, ExplainRiskInput } from '@/lib/gemini';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const ip = getClientIp(req);
+    const rate = checkRateLimit(ip, 'ai_explain', { limit: 20, windowMs: 60000 });
+    if (!rate.success) {
+      return NextResponse.json(
+        { error: 'AI explanation rate limit reached. Please wait a moment.', retryAfterMs: rate.resetMs },
+        { status: 429, headers: { 'Retry-After': String(Math.ceil(rate.resetMs / 1000)) } }
+      );
+    }
+
+    const contentLength = req.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > 65536) {
+      return NextResponse.json(
+        { error: 'Payload size exceeds 64KB limit.' },
+        { status: 413 }
+      );
+    }
+
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json(
+        { error: 'Invalid JSON request payload.' },
+        { status: 400 }
+      );
+    }
 
     if (!body || typeof body !== 'object') {
       return NextResponse.json(
@@ -52,7 +78,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error('Error in /api/ai/explain:', error);
     return NextResponse.json(
-      { error: 'Internal server error processing risk explanation.' },
+      { error: sanitizeErrorMessage(error, 'Internal server error processing risk explanation.') },
       { status: 500 }
     );
   }

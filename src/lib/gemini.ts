@@ -7,7 +7,7 @@ import { GoogleGenAI } from '@google/genai';
 // Gemini for natural-language classification, explanations, and route trade-offs.
 // ==============================================================================
 
-export const GEMINI_DEFAULT_MODEL = 'gemini-2.5-flash';
+export const GEMINI_DEFAULT_MODEL = 'gemini-3.5-flash';
 
 // ------------------------------------------------------------------------------
 // PII Sanitization & Security (FR-AI-11, FR-AI-12)
@@ -456,8 +456,9 @@ async function callGeminiStructured<T>(
   const primaryModel = modelOverride || process.env.GEMINI_MODEL || GEMINI_DEFAULT_MODEL;
   const candidateModels = [
     primaryModel,
-    'gemini-flash-latest',
+    'gemini-3.5-flash',
     'gemini-3.8-flash',
+    'gemini-flash-latest',
   ].filter((m, i, arr) => arr.indexOf(m) === i);
 
   for (const model of candidateModels) {
@@ -484,10 +485,26 @@ async function callGeminiStructured<T>(
       return { data: parsed, model };
     } catch (error) {
       const msg = (error as Error).message || '';
-      // If 404 / NOT_FOUND, try next candidate model
-      if (msg.includes('404') || msg.includes('NOT_FOUND') || msg.includes('not found')) {
+      // 1. If 404 / NOT_FOUND / no longer available, try next candidate model
+      if (
+        msg.includes('404') ||
+        msg.includes('NOT_FOUND') ||
+        msg.includes('not found') ||
+        msg.includes('no longer available')
+      ) {
         continue;
       }
+
+      // 2. If 429 / quota exceeded, halt immediately (account-level rate limit)
+      if (
+        msg.includes('429') ||
+        msg.includes('RESOURCE_EXHAUSTED') ||
+        msg.includes('Quota exceeded')
+      ) {
+        console.warn('[FloodIntel Gemini AI] Account quota reached (429). Fast fallback to deterministic template.');
+        return null;
+      }
+
       console.warn('[FloodIntel Gemini AI] Falling back to deterministic template due to:', msg);
       return null;
     }

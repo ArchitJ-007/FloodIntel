@@ -8,11 +8,29 @@ import {
   RouteCoordinates,
 } from '@/lib/routing';
 import { getInitialDemoIncidents, Incident } from '@/lib/demoIncidents';
+import { checkRateLimit, getClientIp, sanitizeErrorMessage } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
+    const ip = getClientIp(request);
+    const rate = checkRateLimit(ip, 'routes_compare', { limit: 30, windowMs: 60000 });
+    if (!rate.success) {
+      return NextResponse.json(
+        { error: 'Route calculation rate limit exceeded. Please wait a moment.', retryAfterMs: rate.resetMs },
+        { status: 429, headers: { 'Retry-After': String(Math.ceil(rate.resetMs / 1000)) } }
+      );
+    }
+
+    const contentLength = request.headers.get('content-length');
+    if (contentLength && parseInt(contentLength, 10) > 262144) {
+      return NextResponse.json(
+        { error: 'Request payload too large (max 256KB).' },
+        { status: 413 }
+      );
+    }
+
     let body: any;
     try {
       body = await request.json();
@@ -50,15 +68,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 2. Resolve incident hazards
+    // 2. Resolve and sanitize incident hazards
+    const warnings: string[] = [];
     let candidateHazards: Incident[] = [];
     if (Array.isArray(customHazards)) {
-      candidateHazards = customHazards;
+      // Bound to max 100 items and filter to valid coordinates (F-16)
+      candidateHazards = customHazards
+        .slice(0, 100)
+        .filter(
+          (h) =>
+            h &&
+            typeof h === 'object' &&
+            h.coordinates &&
+            typeof h.coordinates.lat === 'number' &&
+            typeof h.coordinates.lng === 'number' &&
+            !isNaN(h.coordinates.lat) &&
+            !isNaN(h.coordinates.lng)
+        );
+      warnings.push('Risk exposure computed against active session hazards (unverified community data).');
     } else {
       candidateHazards = getInitialDemoIncidents();
     }
-
-    const warnings: string[] = [];
 
     // 3. Fetch routes from OSRM with retry and fallback
     let rawRoutes: any[] = [];

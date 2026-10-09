@@ -241,11 +241,16 @@ export default function LandingPage() {
         <section className="space-y-3" id="map-preview">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <h2 className="text-xl sm:text-2xl font-display font-bold text-on-surface">
-                Monsoon Hazard Canvas
-              </h2>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-xl sm:text-2xl font-display font-bold text-on-surface">
+                  Monsoon Hazard Canvas
+                </h2>
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-tertiary/20 text-tertiary border border-tertiary/40">
+                  SIMULATED PREVIEW PINS
+                </span>
+              </div>
               <p className="text-xs sm:text-sm text-on-surface-variant">
-                Live sector telemetry & spatial waterlogging coordinate matrix
+                Illustrative preview canvas showing sample urban hazard topology. Full spatial coordinates available on interactive Risk Map.
               </p>
             </div>
             <div className="flex items-center gap-3 text-xs">
@@ -443,7 +448,9 @@ export default function LandingPage() {
                   {selectedIncident.verifiedCount} Confirms
                 </span>
                 <Link
-                  href="/risk-map"
+                  href={`/risk-map?lat=${selectedIncident.coordinates.lat}&lng=${selectedIncident.coordinates.lng}&label=${encodeURIComponent(
+                    selectedIncident.location
+                  )}`}
                   className="text-primary text-xs font-semibold hover:underline flex items-center gap-0.5"
                 >
                   Drilldown <span className="material-symbols-outlined text-xs">chevron_right</span>
@@ -523,16 +530,15 @@ export default function LandingPage() {
                   02
                 </div>
                 <h3 className="text-base font-display font-bold text-on-surface">
-                  2. AI & Sensor Validation
+                  2. Open-Meteo & Risk Scoring
                 </h3>
                 <p className="text-xs text-on-surface-variant leading-relaxed">
-                  Incoming crowd data is cross-referenced with ultrasonic canal depth gauges, sewer
-                  outflow sensors, and municipal weather radar stations.
+                  Incoming crowd data is scored against Open-Meteo precipitation telemetry, roadway vulnerability factors, and community corroborations.
                 </p>
               </div>
               <div className="pt-3 border-t border-outline-variant/50 flex items-center gap-1.5 text-xs text-secondary">
                 <span className="material-symbols-outlined text-sm">hub</span>
-                <span>Multi-source consensus checking</span>
+                <span>Deterministic risk scoring</span>
               </div>
             </div>
 
@@ -565,12 +571,16 @@ export default function LandingPage() {
               <span className="material-symbols-outlined text-xl">sensors</span>
             </div>
             <div>
-              <h4 className="font-display font-bold text-sm sm:text-base text-on-surface">
-                Telemetry Gateway Online
-              </h4>
-              <p className="text-xs text-on-surface-variant">
-                Monitoring 142 hydrological stations across Delta Basin Zone 4. Ingest latency
-                410ms.
+              <div className="flex items-center gap-2">
+                <h4 className="font-display font-bold text-sm sm:text-base text-on-surface">
+                  Data Pipeline Active
+                </h4>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-tertiary/20 text-tertiary border border-tertiary/30 font-mono font-bold">
+                  LIVE TELEMETRY
+                </span>
+              </div>
+              <p className="text-xs text-on-surface-variant mt-0.5">
+                Connected to Open-Meteo meteorological telemetry, Mappls search, and OSRM routing. {stats.activeHazards} active hazard reports indexed in session.
               </p>
             </div>
           </div>

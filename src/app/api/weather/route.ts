@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeOpenMeteoResponse } from '@/lib/weather';
+import { checkRateLimit, getClientIp, sanitizeErrorMessage } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -52,6 +53,15 @@ async function fetchWithRetry(url: string, retries: number = MAX_RETRIES): Promi
 }
 
 export async function GET(request: NextRequest) {
+  const ip = getClientIp(request);
+  const rate = checkRateLimit(ip, 'weather_api', { limit: 60, windowMs: 60000 });
+  if (!rate.success) {
+    return NextResponse.json(
+      { error: 'Weather API rate limit exceeded. Please try again shortly.', retryAfterMs: rate.resetMs },
+      { status: 429, headers: { 'Retry-After': String(Math.ceil(rate.resetMs / 1000)) } }
+    );
+  }
+
   const { searchParams } = new URL(request.url);
   const latStr = searchParams.get('lat');
   const lngStr = searchParams.get('lng');
