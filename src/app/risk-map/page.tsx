@@ -1,13 +1,25 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { TopNavBar } from '@/components/TopNavBar';
 import { SeverityBadge } from '@/components/SeverityBadge';
 import { StatusBadge } from '@/components/StatusBadge';
 import { useIncidents, Incident, normalizeSeverity } from '@/context/IncidentContext';
 import { useWeather } from '@/hooks/useWeather';
 import { calculateRiskScore } from '@/lib/riskEngine';
+
+// Dynamically import InteractiveFloodMap to prevent Leaflet browser APIs from executing during SSR
+const InteractiveFloodMap = dynamic(() => import('@/components/InteractiveFloodMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex flex-col items-center justify-center bg-[#070e17] text-on-surface-variant font-mono text-xs gap-3">
+      <span className="material-symbols-outlined text-3xl animate-spin text-primary">sync</span>
+      <span>Loading OpenStreetMap geospatial tiles...</span>
+    </div>
+  ),
+});
 
 export default function RiskMapPage() {
   const { incidents, selectedIncident, setSelectedIncidentId, stats } = useIncidents();
@@ -28,11 +40,6 @@ export default function RiskMapPage() {
   const [statusFilter, setStatusFilter] = useState('All Statuses');
   const [zoneFilter, setZoneFilter] = useState('All Zones');
   const [timeWindow, setTimeWindow] = useState('3h');
-
-  // Layer toggles
-  const [showRadar, setShowRadar] = useState(true);
-  const [showTraffic, setShowTraffic] = useState(false);
-  const [zoomLevel, setZoomLevel] = useState(1);
   const [sharedAlertMessage, setSharedAlertMessage] = useState<string | null>(null);
 
   // Live Weather Telemetry (Open-Meteo) for configured city coordinates (Koramangala, Sector 4 Basin)
@@ -44,24 +51,33 @@ export default function RiskMapPage() {
     refetch: refetchWeather,
   } = useWeather(cityCoordinates.lat, cityCoordinates.lng);
 
-  // Dynamically re-evaluate selected incident risk when local weather telemetry is available
+  // Prevent hydration mismatches by ensuring client-side dynamic risk re-evaluation runs only after mount
+  const [hasMounted, setHasMounted] = useState(false);
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
+
+  // Dynamically re-evaluate selected incident risk when local weather telemetry is available (after client mount)
   const evaluatedSelectedRisk = useMemo(() => {
-    if (!selectedIncident) return null;
+    if (!hasMounted || !selectedIncident) return null;
     const isNearbyWeather =
       weather &&
       Math.abs(weather.coordinates.lat - selectedIncident.coordinates.lat) <= 0.05 &&
       Math.abs(weather.coordinates.lng - selectedIncident.coordinates.lng) <= 0.05;
 
+    // Only re-evaluate when local weather telemetry is available to update the calculation
+    if (!isNearbyWeather) return null;
+
     return calculateRiskScore({
       severity: normalizeSeverity(selectedIncident.severity),
       depthCm: selectedIncident.depthCm,
-      rainRiskIndex: isNearbyWeather ? weather.rainRiskIndex : null,
+      rainRiskIndex: weather.rainRiskIndex,
       reportedTimestamp: selectedIncident.reportedTimestamp,
       corroborationCount: selectedIncident.corroborationCount,
       verificationStatus: selectedIncident.verificationStatus,
       provenance: selectedIncident.provenance,
     });
-  }, [selectedIncident, weather]);
+  }, [hasMounted, selectedIncident, weather]);
 
   // Filtered incidents
   const filteredIncidents = useMemo(() => {
@@ -444,9 +460,10 @@ export default function RiskMapPage() {
                           </strong>
                         </span>
                       </div>
-                      <div className="flex items-baseline justify-between">
-                        <div className="flex items-baseline gap-1.5">
+                      <div className="flex items-baseline justify-between" suppressHydrationWarning>
+                        <div className="flex items-baseline gap-1.5" suppressHydrationWarning>
                           <span
+                            suppressHydrationWarning
                             className={`text-2xl font-display font-bold tabular-nums font-mono ${
                               displayCategory === 'high'
                                 ? 'text-error'
@@ -659,345 +676,25 @@ export default function RiskMapPage() {
           </div>
         </aside>
 
-        {/* Large Map Canvas (~70% width) */}
+        {/* Large Map Canvas (~70% width) - Interactive Leaflet Map */}
         <div className="flex-1 relative bg-[#070e17] h-[650px] lg:h-[calc(100vh-112px)] overflow-hidden select-none">
-          {/* SVG Cartography Vector Base */}
-          <div
-            className="absolute inset-0 w-full h-full transition-transform duration-300"
-            style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'center center' }}
-          >
-            <svg
-              className="w-full h-full opacity-90"
-              preserveAspectRatio="none"
-              viewBox="0 0 1000 700"
-            >
-              <defs>
-                <pattern
-                  id="risk-tactical-grid"
-                  width="40"
-                  height="40"
-                  patternUnits="userSpaceOnUse"
-                >
-                  <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#142132" strokeWidth="0.8" />
-                  <circle cx="40" cy="40" r="1.2" fill="#1f334d" />
-                </pattern>
-                <linearGradient id="canalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#0e3a5d" stopOpacity="0.85" />
-                  <stop offset="50%" stopColor="#114b78" stopOpacity="0.95" />
-                  <stop offset="100%" stopColor="#0b2c47" stopOpacity="0.85" />
-                </linearGradient>
-                <linearGradient id="riskRadarPulse" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.3" />
-                  <stop offset="50%" stopColor="#3b82f6" stopOpacity="0.2" />
-                  <stop offset="100%" stopColor="#ef4444" stopOpacity="0.3" />
-                </linearGradient>
-              </defs>
+          <InteractiveFloodMap
+            incidents={filteredIncidents}
+            selectedIncidentId={selectedIncident?.id || null}
+            onSelectIncident={setSelectedIncidentId}
+          />
 
-              {/* Grid Background */}
-              <rect width="1000" height="700" fill="url(#risk-tactical-grid)" />
-
-              {/* Central River / Canal Polyline */}
-              <path
-                d="M -30,220 C 180,180 320,310 490,290 C 660,270 820,420 1030,380"
-                fill="none"
-                stroke="url(#canalGrad)"
-                strokeWidth="42"
-                strokeLinecap="round"
-              />
-              <path
-                d="M -30,220 C 180,180 320,310 490,290 C 660,270 820,420 1030,380"
-                fill="none"
-                stroke="#2272a8"
-                strokeWidth="3.5"
-                strokeDasharray="12 6"
-              />
-              <path
-                d="M 490,290 C 530,450 610,580 720,720"
-                fill="none"
-                stroke="#0e3a5d"
-                strokeWidth="22"
-                strokeLinecap="round"
-              />
-
-              {/* Major Expressways */}
-              <line x1="0" y1="140" x2="1000" y2="140" stroke="#1f2f45" strokeWidth="7" />
-              <line x1="0" y1="520" x2="1000" y2="520" stroke="#1f2f45" strokeWidth="7" />
-              <line x1="360" y1="0" x2="360" y2="700" stroke="#1f2f45" strokeWidth="7" />
-              <line x1="780" y1="0" x2="780" y2="700" stroke="#1f2f45" strokeWidth="7" />
-
-              {/* Diagonals */}
-              <path d="M 80,-20 L 760,720" stroke="#253a54" strokeWidth="5" />
-              <path d="M 940,-20 L 460,720" stroke="#253a54" strokeWidth="5" />
-
-              {/* Secondary Street Network */}
-              <g stroke="#152233" strokeWidth="2.5">
-                <line x1="0" y1="280" x2="1000" y2="280" />
-                <line x1="0" y1="390" x2="1000" y2="390" />
-                <line x1="0" y1="630" x2="1000" y2="630" />
-                <line x1="180" y1="0" x2="180" y2="700" />
-                <line x1="560" y1="0" x2="560" y2="700" />
-                <line x1="910" y1="0" x2="910" y2="700" />
-              </g>
-
-              {/* Weather Radar Cloud Polygon (Toggleable) */}
-              {showRadar && (
-                <g className="transition-opacity duration-300">
-                  <polygon
-                    className="opacity-70 blur-md"
-                    fill="url(#riskRadarPulse)"
-                    points="320,180 580,140 720,320 540,460 310,380"
-                  />
-                  <polygon
-                    className="opacity-60 blur-md"
-                    fill="url(#riskRadarPulse)"
-                    points="680,110 920,130 890,360 700,280"
-                  />
-                </g>
-              )}
-
-              {/* Traffic Heatmap (Toggleable) */}
-              {showTraffic && (
-                <g opacity="0.6">
-                  <path d="M 0,140 L 1000,140" stroke="#ef4444" strokeWidth="5" strokeDasharray="8 4" />
-                  <path d="M 360,0 L 360,700" stroke="#f59e0b" strokeWidth="5" strokeDasharray="8 4" />
-                </g>
-              )}
-
-              {/* Sector Boundaries */}
-              <circle
-                cx="460"
-                cy="320"
-                r="220"
-                fill="none"
-                stroke="#3b82f6"
-                strokeWidth="1.2"
-                strokeDasharray="6 4"
-                opacity="0.3"
-              />
-              <circle
-                cx="780"
-                cy="280"
-                r="180"
-                fill="none"
-                stroke="#ef4444"
-                strokeWidth="1.2"
-                strokeDasharray="6 4"
-                opacity="0.3"
-              />
-            </svg>
-
-            {/* Tactical HUD Sector Labels */}
-            <div className="absolute top-[125px] left-[380px] text-[10px] font-mono text-outline uppercase tracking-widest bg-surface/80 px-1.5 py-0.5 rounded border border-outline-variant/40">
-              Metropolitan Route 10 Expressway
-            </div>
-            <div className="absolute top-[505px] left-[520px] text-[10px] font-mono text-outline uppercase tracking-widest bg-surface/80 px-1.5 py-0.5 rounded border border-outline-variant/40">
-              Grand Union Canal Spillway
-            </div>
-            <div className="absolute top-[260px] left-[120px] text-[10px] font-mono text-secondary/70 uppercase tracking-widest">
-              Sector 4 East Drainage
-            </div>
-            <div className="absolute top-[370px] left-[780px] text-[10px] font-mono text-error/70 uppercase tracking-widest">
-              Basin 12 Rapid Overflow Zone
-            </div>
-          </div>
-
-          {/* Interactive Incident Pins on Map Canvas */}
-          {filteredIncidents.map((incident) => {
-            const isSelected = selectedIncident?.id === incident.id;
-            const x = incident.coordinates.xPercent;
-            const y = incident.coordinates.yPercent;
-
-            return (
-              <div
-                key={incident.id}
-                onClick={() => setSelectedIncidentId(incident.id)}
-                className="absolute -translate-x-1/2 -translate-y-1/2 cursor-pointer z-30 group"
-                style={{ left: `${x}%`, top: `${y}%` }}
-              >
-                {/* Ping waves if High Severity */}
-                {incident.severity === 'high' && (
-                  <>
-                    <span className="absolute -inset-2.5 rounded-full bg-error/30 animate-ping-slow pointer-events-none"></span>
-                    <span className="absolute -inset-5 rounded-full bg-error/15 animate-pulse pointer-events-none"></span>
-                  </>
-                )}
-
-                {/* Pin Container */}
-                <div className="relative flex flex-col items-center">
-                  <div
-                    className={`px-2 py-0.5 font-mono font-bold text-[10px] sm:text-[11px] rounded shadow-xl flex items-center gap-1 transition-all ${
-                      incident.severity === 'high'
-                        ? 'bg-error text-white border border-white/40'
-                        : incident.severity === 'moderate'
-                        ? 'bg-amber-500 text-black border border-amber-300'
-                        : incident.severity === 'low'
-                        ? 'bg-primary text-on-primary border border-white/30'
-                        : 'bg-tertiary-container text-on-tertiary border border-tertiary/40'
-                    } ${isSelected ? 'scale-110 ring-2 ring-white shadow-2xl' : ''}`}
-                  >
-                    <span className="material-symbols-outlined text-xs">
-                      {incident.severity === 'high'
-                        ? 'waves'
-                        : incident.severity === 'moderate'
-                        ? 'water_loss'
-                        : incident.severity === 'low'
-                        ? 'help_outline'
-                        : 'check_circle'}
-                    </span>
-                    <span>{incident.id}</span>
-                  </div>
-
-                  {/* Pointer beacon */}
-                  <div
-                    className={`w-3.5 h-3.5 rotate-45 -mt-1.5 rounded-xs ${
-                      incident.severity === 'high'
-                        ? 'bg-error'
-                        : incident.severity === 'moderate'
-                        ? 'bg-amber-500'
-                        : incident.severity === 'low'
-                        ? 'bg-primary'
-                        : 'bg-tertiary-container'
-                    }`}
-                  ></div>
-                  <div
-                    className={`w-2 h-2 rounded-full bg-white -mt-1 shadow-md ring-2 ${
-                      incident.severity === 'high'
-                        ? 'ring-error'
-                        : incident.severity === 'moderate'
-                        ? 'ring-amber-500'
-                        : 'ring-primary'
-                    }`}
-                  ></div>
-                </div>
-
-                {/* Marker Tooltip on hover */}
-                <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover:flex flex-col bg-surface-container-high border border-outline-variant p-2 rounded-md shadow-2xl min-w-[180px] pointer-events-none z-40">
-                  <span
-                    className={`text-[10px] font-semibold uppercase ${
-                      incident.severity === 'high'
-                        ? 'text-error'
-                        : incident.severity === 'moderate'
-                        ? 'text-amber-400'
-                        : 'text-primary'
-                    }`}
-                  >
-                    {incident.severity.toUpperCase()} • {incident.depth}
-                  </span>
-                  <span className="text-xs text-on-surface font-semibold line-clamp-1">
-                    {incident.title}
-                  </span>
-                  <span className="text-[10px] text-outline mt-0.5">Click to lock inspection</span>
-                </div>
-              </div>
-            );
-          })}
-
-          {/* Top-Right Floating Controls (Layer toggles, GPS, Zoom) */}
-          <div className="absolute top-4 right-4 flex flex-col gap-2 z-30">
-            {/* Map Overlay Toggles */}
-            <div className="bg-surface-container/95 backdrop-blur-md border border-outline-variant rounded-lg p-2 shadow-xl flex flex-col gap-1.5">
-              <label className="flex items-center justify-between gap-3 text-xs text-on-surface hover:text-white cursor-pointer px-1">
-                <span className="flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-secondary text-sm">cloud</span>
-                  Radar Overlay
-                </span>
-                <input
-                  type="checkbox"
-                  checked={showRadar}
-                  onChange={(e) => setShowRadar(e.target.checked)}
-                  className="rounded border-outline-variant text-primary focus:ring-primary bg-surface h-3.5 w-3.5"
-                />
-              </label>
-              <div className="h-px bg-outline-variant/50"></div>
-              <label className="flex items-center justify-between gap-3 text-xs text-on-surface hover:text-white cursor-pointer px-1">
-                <span className="flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-amber-400 text-sm">traffic</span>
-                  Traffic Heatmap
-                </span>
-                <input
-                  type="checkbox"
-                  checked={showTraffic}
-                  onChange={(e) => setShowTraffic(e.target.checked)}
-                  className="rounded border-outline-variant text-primary focus:ring-primary bg-surface h-3.5 w-3.5"
-                />
-              </label>
-            </div>
-
-            {/* Zoom & Re-center widget */}
-            <div className="bg-surface-container/95 backdrop-blur-md border border-outline-variant rounded-lg p-1 shadow-xl flex flex-col items-center">
-              <button
-                onClick={() => setZoomLevel((prev) => Math.min(prev + 0.2, 1.8))}
-                className="w-8 h-8 flex items-center justify-center text-on-surface hover:bg-surface-container-highest rounded text-base transition-colors"
-                title="Zoom in"
-                aria-label="Zoom in"
-              >
-                <span className="material-symbols-outlined">add</span>
-              </button>
-              <div className="w-5 h-px bg-outline-variant/60"></div>
-              <button
-                onClick={() => setZoomLevel((prev) => Math.max(prev - 0.2, 0.8))}
-                className="w-8 h-8 flex items-center justify-center text-on-surface hover:bg-surface-container-highest rounded text-base transition-colors"
-                title="Zoom out"
-                aria-label="Zoom out"
-              >
-                <span className="material-symbols-outlined">remove</span>
-              </button>
-              <div className="w-5 h-px bg-outline-variant/60"></div>
-              <button
-                onClick={() => setZoomLevel(1)}
-                className="w-8 h-8 flex items-center justify-center text-primary hover:bg-surface-container-highest rounded transition-colors"
-                title="Reset zoom"
-                aria-label="Reset zoom"
-              >
-                <span className="material-symbols-outlined text-sm">my_location</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Bottom-Left Map Legend Overlay */}
-          <div className="absolute bottom-4 left-4 bg-surface-container/95 backdrop-blur-md border border-outline-variant rounded-xl p-3 shadow-2xl z-30 max-w-xs hidden sm:block">
-            <div className="flex items-center justify-between pb-2 border-b border-outline-variant/60 mb-2">
-              <span className="font-display text-xs font-semibold uppercase tracking-wider text-on-surface flex items-center gap-1.5">
-                <span className="material-symbols-outlined text-sm text-primary">layers</span>
-                Risk Severity Legend
-              </span>
-              <span className="text-[10px] text-outline font-mono">EDP-9 Live</span>
-            </div>
-            <div className="grid grid-cols-2 gap-y-2 gap-x-3 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-error border border-white/30 shrink-0"></span>
-                <span className="text-on-surface">Red: <strong className="text-error font-semibold">High (&gt;2 ft)</strong></span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-amber-400 border border-white/30 shrink-0"></span>
-                <span className="text-on-surface">Amber: <strong className="text-amber-400 font-semibold">Moderate</strong></span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-primary border border-white/30 shrink-0"></span>
-                <span className="text-on-surface">Blue: <strong className="text-primary font-semibold">Unverified</strong></span>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-tertiary border border-white/30 shrink-0"></span>
-                <span className="text-on-surface">Green: <strong className="text-tertiary font-semibold">Cleared</strong></span>
-              </div>
-            </div>
-            <div className="mt-2.5 pt-2 border-t border-outline-variant/40 flex items-center justify-between text-[10px] text-outline">
-              <span>Telemetry sync: 15s</span>
-              <span className="text-secondary underline cursor-pointer">Zone Matrix</span>
-            </div>
-          </div>
-
-          {/* Floating 'Plan a Journey' Shortcut Button on Map bottom-right */}
-          <div className="absolute bottom-4 right-4 z-30">
+          {/* Floating 'Plan a Journey' Shortcut Button on Map */}
+          <div className="absolute bottom-6 right-16 z-[1000] hidden sm:block">
             <Link
               href="/plan-journey"
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-semibold text-xs sm:text-sm shadow-2xl border border-primary-fixed/30 hover:scale-[1.02] active:scale-[0.98] transition-all"
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-semibold text-xs shadow-2xl border border-primary-fixed/30 hover:scale-[1.02] active:scale-[0.98] transition-all"
             >
-              <span className="w-6 h-6 rounded-md bg-on-primary/20 flex items-center justify-center text-on-primary">
-                <span className="material-symbols-outlined text-base">alt_route</span>
+              <span className="w-5 h-5 rounded-md bg-on-primary/20 flex items-center justify-center text-on-primary">
+                <span className="material-symbols-outlined text-sm">alt_route</span>
               </span>
               <span>Plan Safe Route</span>
-              <span className="material-symbols-outlined text-sm ml-0.5">arrow_forward</span>
+              <span className="material-symbols-outlined text-xs ml-0.5">arrow_forward</span>
             </Link>
           </div>
         </div>
