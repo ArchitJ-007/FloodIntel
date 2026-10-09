@@ -1,70 +1,277 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { TopNavBar } from '@/components/TopNavBar';
 import { Footer } from '@/components/Footer';
 import { useIncidents, HazardCategory, SeverityType } from '@/context/IncidentContext';
+import {
+  validateHazardReport,
+  detectDuplicateReport,
+  DuplicateMatchInfo,
+} from '@/lib/reportingValidation';
+import { LocationSearchBox } from '@/components/LocationSearchBox';
 
-export default function ReportHazardPage() {
-  const { addHazard } = useIncidents();
+function ReportHazardContent() {
+  const { addHazard, incidents } = useIncidents();
+  const searchParams = useSearchParams();
 
-  // Form states
-  const [location, setLocation] = useState('4th Cross Rd & 80ft Road Junction, Koramangala');
-  const [gpsCoordinates, setGpsCoordinates] = useState('GPS: 12.9348° N, 77.6205° E • Sector 4 Basin');
-  const [hazardType, setHazardType] = useState<HazardCategory>('waterlogging');
-  const [severity, setSeverity] = useState<SeverityType>('high');
-  const [waterDepth, setWaterDepth] = useState<'curb' | 'knee' | 'deep'>('knee');
-  const [description, setDescription] = useState(
-    'Water is accumulating rapidly near the railway underpass. Sedans are getting stuck. Drainage appears completely clogged.'
+  const paramLat = searchParams.get('lat') ? parseFloat(searchParams.get('lat')!) : null;
+  const paramLng = searchParams.get('lng') ? parseFloat(searchParams.get('lng')!) : null;
+  const paramLocation = searchParams.get('location') || null;
+
+  // Form states (F-33: Clean initial states with no fake prefilled values)
+  const [location, setLocation] = useState(paramLocation || '');
+  const [reportCoords, setReportCoords] = useState<{ lat: number; lng: number } | null>(
+    paramLat !== null && !isNaN(paramLat) && paramLng !== null && !isNaN(paramLng)
+      ? { lat: paramLat, lng: paramLng }
+      : null
   );
-  const [reporterMode, setReporterMode] = useState<'anonymous' | 'notify'>('notify');
-  const [contact, setContact] = useState('ops.citizen.ward4@floodintel.org');
+
+  const [gpsCoordinates, setGpsCoordinates] = useState(
+    paramLat !== null && paramLng !== null
+      ? `GPS: ${paramLat.toFixed(4)}° N, ${paramLng.toFixed(4)}° E • India`
+      : 'Coordinates not yet acquired. Select a verified location above or use device GPS.'
+  );
+
+  useEffect(() => {
+    if (paramLat !== null && paramLng !== null && !isNaN(paramLat) && !isNaN(paramLng)) {
+      setReportCoords({ lat: paramLat, lng: paramLng });
+      setGpsCoordinates(`GPS: ${paramLat.toFixed(4)}° N, ${paramLng.toFixed(4)}° E • India`);
+    }
+    if (paramLocation) {
+      setLocation(paramLocation);
+    }
+  }, [paramLat, paramLng, paramLocation]);
+
+  const [hazardType, setHazardType] = useState<HazardCategory>('waterlogging');
+  const [severity, setSeverity] = useState<SeverityType>('moderate');
+  const [waterDepth, setWaterDepth] = useState<'curb' | 'knee' | 'deep'>('knee');
+  const [description, setDescription] = useState('');
+  const [reporterMode, setReporterMode] = useState<'anonymous' | 'notify'>('anonymous');
+  const [contact, setContact] = useState('');
+
+  // Local photo attachment state (F-12)
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+
+  // Clean up object URL on unmount
+  useEffect(() => {
+    return () => {
+      if (photoPreviewUrl) {
+        URL.revokeObjectURL(photoPreviewUrl);
+      }
+    };
+  }, [photoPreviewUrl]);
 
   // Mini map pin position state
   const [pinPosition, setPinPosition] = useState({ x: 50, y: 50 });
 
-  // Submission state
+  // AI Incident Classification state
+  const [aiClassification, setAiClassification] = useState<any | null>(null);
+  const [isClassifying, setIsClassifying] = useState(false);
+  const [classificationError, setClassificationError] = useState<string | null>(null);
+
+  const handleClassify = async () => {
+    if (!description.trim()) return;
+    setIsClassifying(true);
+    setClassificationError(null);
+
+    try {
+      const res = await fetch('/api/ai/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          description,
+          userCategory: hazardType,
+          userSeverity: severity,
+        }),
+      });
+
+      if (!res.ok) throw new Error('Classification request failed');
+      const data = await res.json();
+      setAiClassification(data);
+    } catch {
+      setClassificationError('AI classification temporarily unavailable.');
+    } finally {
+      setIsClassifying(false);
+    }
+  };
+
+  const applyAiSuggestions = () => {
+    if (!aiClassification) return;
+
+    // Apply category
+    if (aiClassification.suggestedCategory === 'drain_overflow') {
+      setHazardType('drainage_failure');
+    } else if (aiClassification.suggestedCategory === 'underpass_flooding') {
+      setHazardType('flooded_road');
+    } else if (aiClassification.suggestedCategory === 'road_closed') {
+      setHazardType('blocked_road');
+    } else {
+      setHazardType('waterlogging');
+    }
+
+    // Apply severity
+    if (aiClassification.suggestedSeverity === 'severe') {
+      setSeverity('high');
+    } else if (aiClassification.suggestedSeverity === 'moderate') {
+      setSeverity('moderate');
+    } else {
+      setSeverity('low');
+    }
+
+    // Apply depth
+    if (aiClassification.extractedDepthCm !== null) {
+      if (aiClassification.extractedDepthCm >= 50) setWaterDepth('deep');
+      else if (aiClassification.extractedDepthCm >= 20) setWaterDepth('knee');
+      else setWaterDepth('curb');
+    }
+  };
+
+  // Submission & Validation state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createdIncidentId, setCreatedIncidentId] = useState<string | null>(null);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [generalError, setGeneralError] = useState<string | null>(null);
+  const [possibleDuplicate, setPossibleDuplicate] = useState<DuplicateMatchInfo | null>(null);
+
+  const submitReport = async (overrideDuplicate = false) => {
+    setErrors({});
+    setGeneralError(null);
+    setIsSubmitting(true);
+
+    if (!reportCoords) {
+      setErrors({ coordinates: 'Location coordinates are required. Please search and select a verified address from suggestions or enable device GPS.' });
+      setIsSubmitting(false);
+      return;
+    }
+
+    // Derive coordinates relative to selected Indian location
+    const lat = Number((reportCoords.lat + (50 - pinPosition.y) * 0.0004).toFixed(5));
+    const lng = Number((reportCoords.lng + (pinPosition.x - 50) * 0.0004).toFixed(5));
+
+    // 1. Client-Side Validation
+    const clientValidation = validateHazardReport({
+      location,
+      hazardType,
+      severity,
+      waterDepth,
+      description,
+      reporterMode,
+      contact,
+      coordinates: { lat, lng },
+    });
+
+    if (!clientValidation.isValid) {
+      setErrors(clientValidation.errors);
+      setIsSubmitting(false);
+      return;
+    }
+
+    // 2. Duplicate Detection Check
+    if (!overrideDuplicate) {
+      const dupCheck = detectDuplicateReport(
+        {
+          coordinates: { lat, lng },
+          hazardType,
+          description,
+          location,
+        },
+        incidents
+      );
+
+      if (dupCheck.isDuplicateCandidate && dupCheck.match) {
+        setPossibleDuplicate(dupCheck.match);
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    // 3. Server-Side Validation Endpoint Check
+    try {
+      const res = await fetch('/api/reports/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          location: clientValidation.sanitized!.location,
+          hazardType,
+          severity,
+          waterDepth,
+          description: clientValidation.sanitized!.description,
+          reporterMode,
+          contact,
+          coordinates: { lat, lng },
+          activeIncidents: incidents,
+        }),
+      });
+
+      const serverResult = await res.json();
+      if (!res.ok) {
+        if (serverResult.fieldErrors) {
+          setErrors(serverResult.fieldErrors);
+        } else {
+          setGeneralError(serverResult.error || 'Server validation failed.');
+        }
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (
+        !overrideDuplicate &&
+        serverResult.duplicateCheck?.isDuplicateCandidate &&
+        serverResult.duplicateCheck.match
+      ) {
+        setPossibleDuplicate(serverResult.duplicateCheck.match);
+        setIsSubmitting(false);
+        return;
+      }
+    } catch (e) {
+      console.warn('Server validation check unavailable, proceeding with verified client validation:', e);
+    }
+
+    // 4. Register Incident in IncidentContext
+    const incident = addHazard({
+      location: clientValidation.sanitized!.location,
+      hazardType,
+      severity,
+      waterDepth,
+      description: clientValidation.sanitized!.description,
+      reporterMode,
+      contact: reporterMode === 'notify' ? contact : undefined,
+      coordinates: { lat, lng },
+    });
+
+    setCreatedIncidentId(incident.id);
+    setPossibleDuplicate(null);
+    setIsSubmitting(false);
+    setShowSuccessToast(true);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
-
-    setTimeout(() => {
-      const incident = addHazard({
-        location,
-        hazardType,
-        severity,
-        waterDepth,
-        description,
-        reporterMode,
-        contact: reporterMode === 'notify' ? contact : undefined,
-      });
-
-      setCreatedIncidentId(incident.id);
-      setIsSubmitting(false);
-      setShowSuccessToast(true);
-    }, 700);
+    submitReport(false);
   };
 
   const handleUseGps = () => {
     if (navigator?.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          const lat = pos.coords.latitude.toFixed(4);
-          const lng = pos.coords.longitude.toFixed(4);
-          setGpsCoordinates(`GPS: ${lat}° N, ${lng}° E • Sector 4 Basin`);
-          setLocation(`Current Geo-Tagged Location (${lat}, ${lng})`);
+          const latVal = Number(pos.coords.latitude.toFixed(4));
+          const lngVal = Number(pos.coords.longitude.toFixed(4));
+          setReportCoords({ lat: latVal, lng: lngVal });
+          setGpsCoordinates(`GPS: ${latVal}° N, ${lngVal}° E • Acquired via Device GPS`);
+          setLocation(`Device GPS Acquired Location (${latVal}, ${lngVal})`);
         },
         () => {
-          setGpsCoordinates('GPS: 12.9352° N, 77.6241° E (Device Location Acquired)');
+          setGpsCoordinates('GPS acquisition unavailable. Please use the location search bar above.');
         }
       );
     } else {
-      setGpsCoordinates('GPS: 12.9352° N, 77.6241° E (Device Location Acquired)');
+      setGpsCoordinates('GPS acquisition unavailable on this device.');
     }
   };
 
@@ -104,9 +311,9 @@ export default function ReportHazardPage() {
             </div>
           </div>
 
-          {/* Success Banner if submitted */}
+          {/* Success Banner if submitted (PRD F-07: Truthful persistence wording) */}
           {showSuccessToast && createdIncidentId && (
-            <div className="p-4 rounded-xl bg-surface-container-low border border-tertiary-container/50 flex items-start justify-between gap-4 shadow-2xl animate-in fade-in slide-in-from-top-2">
+            <div className="p-4 rounded-xl bg-surface-container-low border border-tertiary-container/50 flex items-start justify-between gap-4 shadow-2xl animate-in fade-in slide-in-from-top-2" role="status" aria-live="polite">
               <div className="flex items-start gap-3">
                 <div className="w-8 h-8 rounded-full bg-tertiary/15 border border-tertiary/30 text-tertiary flex items-center justify-center mt-0.5 shrink-0">
                   <span
@@ -119,23 +326,26 @@ export default function ReportHazardPage() {
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-tertiary">
-                      Live Incident Created Successfully!
+                      Report Saved on this Device
                     </span>
                     <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-surface-container-highest text-primary">
-                      DISPATCH QUEUED
+                      LOCAL DEVICE PERSISTENCE
                     </span>
                   </div>
                   <p className="text-xs text-on-surface">
                     Report <span className="font-mono font-bold text-primary">{createdIncidentId}</span> has
-                    been registered and added to Sector 4 Triage Queue.
+                    been saved on this browser device. It is unverified and is not shared with other users or remote municipal dispatchers.
                   </p>
                   <div className="flex items-center gap-3 pt-1 text-xs">
-                    <Link href="/risk-map" className="text-primary hover:underline font-semibold">
+                    <Link
+                      href={`/risk-map?lat=${reportCoords?.lat ?? 12.9352}&lng=${reportCoords?.lng ?? 77.6245}&label=${encodeURIComponent(location || 'Reported Incident')}`}
+                      className="text-primary hover:underline font-semibold"
+                    >
                       View on Risk Map →
                     </Link>
                     <span className="text-outline">•</span>
                     <Link href="/officials" className="text-secondary hover:underline font-semibold">
-                      Inspect in Officials Dashboard →
+                      Inspect in Officials Console →
                     </Link>
                   </div>
                 </div>
@@ -175,22 +385,42 @@ export default function ReportHazardPage() {
               {/* Location Search Field */}
               <div className="space-y-1.5">
                 <label htmlFor="location-query" className="block text-xs font-semibold text-on-surface">
-                  Street Address / Landmark
+                  Street Address / Landmark (Nationwide India Search)
                 </label>
-                <div className="relative">
-                  <span className="material-symbols-outlined absolute left-3 top-2.5 text-outline text-lg">
-                    search
-                  </span>
-                  <input
-                    id="location-query"
-                    type="text"
-                    required
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    placeholder="Enter street name, cross street, or landmark..."
-                    className="w-full bg-[#122131] border border-[#222F44] rounded-lg pl-9 pr-4 py-2 text-xs sm:text-sm text-on-surface placeholder-outline focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-colors"
-                  />
-                </div>
+                <LocationSearchBox
+                  id="location-query"
+                  placeholder="Search street name, landmark, or Indian city (e.g. Mumbai, Delhi, Silk Board)..."
+                  initialValue={location}
+                  icon="location_on"
+                  iconColor="text-primary"
+                  onSelect={(place) => {
+                    setLocation(place.formattedAddress || place.name);
+                    setGpsCoordinates(
+                      `GPS: ${place.lat.toFixed(4)}° N, ${place.lng.toFixed(4)}° E • ${place.state || 'India'}`
+                    );
+                    setReportCoords({ lat: place.lat, lng: place.lng });
+                    setErrors((prev) => ({ ...prev, location: '', coordinates: '' }));
+                    setPossibleDuplicate(null);
+                  }}
+                  onClearOrInvalidate={() => {
+                    setReportCoords(null);
+                    setGpsCoordinates('Coordinates unresolved. Please select a verified suggestion from the search list.');
+                    setPossibleDuplicate(null);
+                  }}
+                  inputClassName="bg-[#122131] border-[#222F44]"
+                />
+                {errors.location && (
+                  <p className="text-xs text-error mt-1 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-xs">error</span>
+                    <span>{errors.location}</span>
+                  </p>
+                )}
+                {errors.coordinates && (
+                  <p className="text-xs text-error mt-1 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-xs">error</span>
+                    <span>{errors.coordinates}</span>
+                  </p>
+                )}
               </div>
 
               {/* Mini Interactive Map Pin Selector Container */}
@@ -487,14 +717,29 @@ export default function ReportHazardPage() {
 
               {/* Textarea */}
               <div className="space-y-1.5">
-                <label htmlFor="incident-notes" className="block text-xs font-semibold text-on-surface">
-                  Detailed Observation
-                </label>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="incident-notes" className="block text-xs font-semibold text-on-surface">
+                    Detailed Observation
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDescription('Water is accumulating rapidly near the railway underpass. Sedans are getting stuck. Drainage appears completely clogged.');
+                      setPossibleDuplicate(null);
+                    }}
+                    className="text-[11px] text-primary hover:underline font-mono"
+                  >
+                    + Fill Sample Scenario (Demo)
+                  </button>
+                </div>
                 <textarea
                   id="incident-notes"
                   rows={3}
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  onChange={(e) => {
+                    setDescription(e.target.value);
+                    if (possibleDuplicate) setPossibleDuplicate(null);
+                  }}
                   className="w-full bg-[#122131] border border-[#222F44] rounded-lg p-3 text-xs sm:text-sm text-on-surface placeholder-outline focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary custom-scroll"
                   placeholder="Describe trapped vehicles, overflowing drains, or blockage extent..."
                 />
@@ -502,25 +747,219 @@ export default function ReportHazardPage() {
                   <span>Be specific about direction of travel and blocked choke points.</span>
                   <span className="font-mono">{description.length} / 500 characters</span>
                 </div>
+                {errors.description && (
+                  <p className="text-xs text-error mt-1 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-xs">error</span>
+                    <span>{errors.description}</span>
+                  </p>
+                )}
+
+                {/* AI Assistant Classification Trigger & Suggestion Card */}
+                <div className="pt-2">
+                  <div className="flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={handleClassify}
+                      disabled={isClassifying || !description.trim()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-high border border-secondary/40 text-secondary hover:bg-secondary/10 text-xs font-semibold transition-all disabled:opacity-40"
+                    >
+                      <span
+                        className={`material-symbols-outlined text-sm ${isClassifying ? 'animate-spin' : ''}`}
+                        style={{ fontVariationSettings: "'FILL' 1" }}
+                      >
+                        {isClassifying ? 'sync' : 'auto_awesome'}
+                      </span>
+                      <span>{isClassifying ? 'Analyzing with Gemini...' : 'Analyze Description with AI'}</span>
+                    </button>
+                    <span className="text-[10px] text-outline font-mono">
+                      Editable Suggestion • Non-binding
+                    </span>
+                  </div>
+
+                  {classificationError && (
+                    <div className="mt-2 p-2 rounded bg-error/15 border border-error/30 text-[11px] text-error flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-xs">error</span>
+                      <span>{classificationError}</span>
+                    </div>
+                  )}
+
+                  {aiClassification && (
+                    <div className="mt-3 p-3.5 rounded-xl bg-surface-container border border-secondary-container/50 space-y-3 animate-in fade-in">
+                      <div className="flex items-center justify-between pb-2 border-b border-outline-variant/40">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="material-symbols-outlined text-secondary text-sm"
+                            style={{ fontVariationSettings: "'FILL' 1" }}
+                          >
+                            smart_toy
+                          </span>
+                          <span className="text-xs font-bold text-secondary">
+                            AI-Suggested Parameters
+                          </span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-surface-container-high text-on-surface-variant">
+                            {Math.round(aiClassification.confidence * 100)}% Confidence
+                          </span>
+                        </div>
+                        <span
+                          className={`text-[9px] font-mono uppercase px-2 py-0.5 rounded-full border ${
+                            aiClassification.generatedBy === 'gemini'
+                              ? 'bg-purple-950/40 text-purple-300 border-purple-500/40'
+                              : 'bg-surface-container-high text-on-surface-variant border-outline-variant'
+                          }`}
+                        >
+                          {aiClassification.generatedBy === 'gemini' ? 'Gemini AI' : 'Deterministic Template'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                        <div className="p-2 rounded bg-surface-container-low border border-outline-variant/40">
+                          <span className="text-[10px] uppercase font-mono text-outline block">
+                            Suggested Type
+                          </span>
+                          <strong className="text-on-surface capitalize">
+                            {aiClassification.suggestedCategory.replace(/_/g, ' ')}
+                          </strong>
+                        </div>
+                        <div className="p-2 rounded bg-surface-container-low border border-outline-variant/40">
+                          <span className="text-[10px] uppercase font-mono text-outline block">
+                            Suggested Severity
+                          </span>
+                          <strong
+                            className={
+                              aiClassification.suggestedSeverity === 'severe'
+                                ? 'text-error'
+                                : aiClassification.suggestedSeverity === 'moderate'
+                                ? 'text-amber-400'
+                                : 'text-primary'
+                            }
+                          >
+                            {aiClassification.suggestedSeverity.toUpperCase()}
+                          </strong>
+                        </div>
+                        <div className="p-2 rounded bg-surface-container-low border border-outline-variant/40">
+                          <span className="text-[10px] uppercase font-mono text-outline block">
+                            Extracted Depth
+                          </span>
+                          <strong className="text-on-surface">
+                            {aiClassification.extractedDepthCm !== null
+                              ? `≈ ${aiClassification.extractedDepthCm} cm`
+                              : 'Not specified in text'}
+                          </strong>
+                        </div>
+                      </div>
+
+                      {/* Warnings / Contradictions */}
+                      {aiClassification.warnings && aiClassification.warnings.length > 0 && (
+                        <div className="p-2 rounded bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-300 space-y-0.5">
+                          {aiClassification.warnings.map((w: string, idx: number) => (
+                            <div key={idx} className="flex items-start gap-1">
+                              <span className="material-symbols-outlined text-xs shrink-0 mt-0.5">
+                                warning
+                              </span>
+                              <span>{w}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Apply Button & Disclaimer */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-1">
+                        <span className="text-[10px] text-outline">
+                          Does not auto-verify reports; you retain full control before submission.
+                        </span>
+                        <button
+                          type="button"
+                          onClick={applyAiSuggestions}
+                          className="px-3 py-1.5 rounded-lg bg-primary text-on-primary font-semibold text-xs flex items-center justify-center gap-1.5 hover:bg-opacity-90 transition-colors shadow-sm"
+                        >
+                          <span className="material-symbols-outlined text-xs">check_circle</span>
+                          <span>Apply AI Suggestions to Form</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {/* Drag and Drop Evidence Upload */}
-              <div className="space-y-1.5">
+              {/* Functional Local Photo Evidence Upload (PRD F-12) */}
+              <div className="space-y-2">
                 <label className="block text-xs font-semibold text-on-surface">
-                  Optional Photo / Evidence Upload
+                  Photo / Visual Evidence (Local Session Only)
                 </label>
-                <label className="border-2 border-dashed border-[#334155] hover:border-primary/60 rounded-xl p-5 bg-[#0d1c2d]/60 flex flex-col items-center justify-center text-center cursor-pointer transition-colors group">
-                  <input type="file" accept="image/*" className="hidden" />
-                  <div className="w-10 h-10 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center text-primary mb-2 group-hover:scale-105 transition-transform">
-                    <span className="material-symbols-outlined text-2xl">photo_camera</span>
+                
+                {photoPreviewUrl ? (
+                  <div className="p-3.5 rounded-xl bg-surface-container border border-outline-variant/60 flex flex-col sm:flex-row items-center gap-4">
+                    <img
+                      src={photoPreviewUrl}
+                      alt="Selected waterlogging evidence"
+                      className="w-24 h-24 object-cover rounded-lg border border-outline-variant shrink-0"
+                    />
+                    <div className="flex-1 space-y-1 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-on-surface truncate max-w-[200px]">
+                          {photoFile?.name}
+                        </span>
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-container-highest text-primary">
+                          {photoFile ? `${(photoFile.size / (1024 * 1024)).toFixed(2)} MB` : ''}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-on-surface-variant">
+                        Stored locally in this browser session. Remote storage service is not configured.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+                          setPhotoFile(null);
+                          setPhotoPreviewUrl(null);
+                        }}
+                        className="text-error hover:underline text-[11px] font-semibold flex items-center gap-1 pt-1"
+                      >
+                        <span className="material-symbols-outlined text-xs">delete</span>
+                        Remove attached photo
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-xs text-on-surface font-medium">
-                    Upload photo of waterlogging <span className="text-on-surface-variant font-normal">(Max 10MB)</span>
+                ) : (
+                  <label className="border-2 border-dashed border-[#334155] hover:border-primary/60 rounded-xl p-5 bg-[#0d1c2d]/60 flex flex-col items-center justify-center text-center cursor-pointer transition-colors group">
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={(e) => {
+                        setPhotoError(null);
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        if (!file.type.startsWith('image/')) {
+                          setPhotoError('Invalid file format. Please upload JPEG, PNG, or WebP image.');
+                          return;
+                        }
+                        if (file.size > 10 * 1024 * 1024) {
+                          setPhotoError(`File exceeds 10MB limit (${(file.size / (1024 * 1024)).toFixed(1)} MB).`);
+                          return;
+                        }
+                        setPhotoFile(file);
+                        setPhotoPreviewUrl(URL.createObjectURL(file));
+                      }}
+                      className="hidden"
+                    />
+                    <div className="w-10 h-10 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center text-primary mb-2 group-hover:scale-105 transition-transform">
+                      <span className="material-symbols-outlined text-2xl">photo_camera</span>
+                    </div>
+                    <p className="text-xs text-on-surface font-medium">
+                      Select photo of waterlogging <span className="text-on-surface-variant font-normal">(Max 10MB)</span>
+                    </p>
+                    <p className="text-[11px] text-outline mt-0.5">
+                      Click to browse or drag file (JPEG, PNG, WebP)
+                    </p>
+                  </label>
+                )}
+
+                {photoError && (
+                  <p className="text-xs text-error mt-1 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-xs">error</span>
+                    <span>{photoError}</span>
                   </p>
-                  <p className="text-[11px] text-outline mt-0.5">
-                    Drag and drop or browse files (JPEG, PNG, HEIC)
-                  </p>
-                </label>
+                )}
               </div>
 
               {/* Reporter Contact */}
@@ -583,6 +1022,65 @@ export default function ReportHazardPage() {
               </div>
             </section>
 
+            {/* General Server/Validation Error Banner (F-24) */}
+            {generalError && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="p-3 rounded-lg bg-error/15 border border-error/40 text-xs text-error flex items-center gap-2"
+              >
+                <span className="material-symbols-outlined text-sm shrink-0">error</span>
+                <span>{generalError}</span>
+              </div>
+            )}
+
+            {/* Possible Duplicate Warning Card (F-24) */}
+            {possibleDuplicate && (
+              <div
+                role="alert"
+                aria-live="polite"
+                className="p-4 rounded-xl bg-amber-500/10 border-2 border-amber-500/40 text-xs space-y-3 animate-in fade-in"
+              >
+                <div className="flex items-start gap-2.5">
+                  <span className="material-symbols-outlined text-amber-400 text-xl shrink-0 mt-0.5">
+                    warning
+                  </span>
+                  <div className="space-y-1 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-amber-400 uppercase tracking-wide">
+                        Possible Duplicate Report Identified
+                      </h4>
+                      <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300">
+                        {possibleDuplicate.id}
+                      </span>
+                    </div>
+                    <p className="text-on-surface leading-relaxed">
+                      A similar active report (<strong>{possibleDuplicate.title}</strong>) was recorded at {possibleDuplicate.location} approximately {possibleDuplicate.minutesAgo} minutes ago within {possibleDuplicate.distanceM} meters ({possibleDuplicate.reason}).
+                    </p>
+                    <p className="text-on-surface-variant text-[11px]">
+                      To maintain dispatch clarity, please review if this describes the same waterlogging or represents a distinct obstruction.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-amber-500/20">
+                  <Link
+                    href="/risk-map"
+                    className="px-3 py-1.5 rounded-lg bg-surface-container border border-outline-variant hover:border-primary text-primary font-semibold text-xs transition-colors"
+                  >
+                    Review Existing on Map
+                  </Link>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => submitReport(true)}
+                    className="px-3 py-1.5 rounded-lg bg-amber-400 text-black font-bold text-xs hover:bg-amber-300 transition-colors shadow-sm disabled:opacity-50"
+                  >
+                    {isSubmitting ? 'Submitting...' : 'Submit Distinct Hazard Observation Anyway'}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* ================= SUBMISSION FOOTER ================= */}
             <div className="pt-4 border-t border-[#222F44] flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-2 text-tertiary text-xs font-medium">
@@ -592,7 +1090,7 @@ export default function ReportHazardPage() {
                 >
                   check_circle
                 </span>
-                <span>All required fields completed. Ready for dispatch ingestion.</span>
+                <span>Citizen report is verified client-side before dispatch ingestion.</span>
               </div>
 
               <div className="flex items-center gap-3 w-full sm:w-auto">
@@ -607,8 +1105,10 @@ export default function ReportHazardPage() {
                   disabled={isSubmitting}
                   className="w-1/2 sm:w-auto px-7 py-2.5 rounded-lg bg-primary text-on-primary hover:bg-opacity-95 font-display text-xs sm:text-sm font-bold tracking-wide shadow-lg shadow-primary/10 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                 >
-                  <span className="material-symbols-outlined text-base">send</span>
-                  <span>{isSubmitting ? 'Ingesting Report...' : 'Submit Report'}</span>
+                  <span className={`material-symbols-outlined text-base ${isSubmitting ? 'animate-spin' : ''}`}>
+                    {isSubmitting ? 'sync' : 'send'}
+                  </span>
+                  <span>{isSubmitting ? 'Validating & Ingesting...' : 'Submit Report'}</span>
                 </button>
               </div>
             </div>
@@ -618,5 +1118,19 @@ export default function ReportHazardPage() {
 
       <Footer />
     </div>
+  );
+}
+
+export default function ReportHazardPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#0B1120] flex items-center justify-center text-on-surface-variant font-mono text-xs">
+          Loading Report Form...
+        </div>
+      }
+    >
+      <ReportHazardContent />
+    </Suspense>
   );
 }

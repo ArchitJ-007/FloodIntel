@@ -5,10 +5,13 @@ import Link from 'next/link';
 import { TopNavBar } from '@/components/TopNavBar';
 import { Footer } from '@/components/Footer';
 import { useIncidents } from '@/context/IncidentContext';
+import { LocationSearchBox } from '@/components/LocationSearchBox';
+import type { PlaceResult } from '@/lib/places';
 
 export default function LandingPage() {
   const { stats, incidents } = useIncidents();
   const [activePinId, setActivePinId] = useState<string>('#FLD-084');
+  const [selectedPlace, setSelectedPlace] = useState<PlaceResult | null>(null);
 
   const selectedIncident =
     incidents.find((i) => i.id === activePinId) || incidents[0];
@@ -38,6 +41,111 @@ export default function LandingPage() {
             <p className="text-base sm:text-lg text-on-surface-variant max-w-2xl leading-relaxed">
               View citizen-reported waterlogging incidents, track live monsoon inundation alerts, and make safer, data-informed travel decisions before stepping out.
             </p>
+
+            {/* Live Location Search Control */}
+            <div className="pt-2 max-w-2xl space-y-3">
+              <div className="bg-surface-container border border-outline-variant rounded-xl p-3.5 shadow-lg">
+                <label className="text-[11px] font-bold uppercase tracking-wider text-primary block mb-2 flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-sm">travel_explore</span>
+                  <span>Search Any City, District or Road in India</span>
+                </label>
+                <LocationSearchBox
+                  id="landing-place-search"
+                  placeholder="Enter city or locality (e.g. Mumbai, Delhi, Pune, Chennai, Silk Board)..."
+                  onSelect={(place) => setSelectedPlace(place)}
+                  inputClassName="bg-surface-container-low"
+                />
+
+                {/* Popular Quick-Select Cities */}
+                <div className="flex flex-wrap items-center gap-1.5 mt-2.5 pt-2 border-t border-outline-variant/40 text-xs">
+                  <span className="text-[10px] uppercase font-mono text-outline shrink-0">
+                    Quick Jump:
+                  </span>
+                  {[
+                    { name: 'Mumbai', lat: 19.076, lng: 72.8777, state: 'Maharashtra' },
+                    { name: 'Delhi', lat: 28.6139, lng: 77.209, state: 'Delhi' },
+                    { name: 'Bengaluru', lat: 12.9716, lng: 77.5946, state: 'Karnataka' },
+                    { name: 'Chennai', lat: 13.0827, lng: 80.2707, state: 'Tamil Nadu' },
+                    { name: 'Pune', lat: 18.5204, lng: 73.8567, state: 'Maharashtra' },
+                    { name: 'Hyderabad', lat: 17.385, lng: 78.4867, state: 'Telangana' },
+                  ].map((city) => (
+                    <button
+                      key={city.name}
+                      type="button"
+                      onClick={() =>
+                        setSelectedPlace({
+                          id: `preset-${city.name.toLowerCase()}`,
+                          name: city.name,
+                          formattedAddress: `${city.name}, ${city.state}, India`,
+                          lat: city.lat,
+                          lng: city.lng,
+                          countryCode: 'IN',
+                          state: city.state,
+                          source: 'curated',
+                        })
+                      }
+                      className="px-2 py-0.5 rounded-full bg-surface-container-high hover:bg-primary/20 hover:text-primary border border-outline-variant text-[11px] font-medium text-on-surface-variant transition-colors"
+                    >
+                      {city.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Selected Location Target Actions */}
+              {selectedPlace && (
+                <div className="p-3.5 rounded-xl bg-surface-container-high border border-primary/40 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-primary text-base">
+                        pin_drop
+                      </span>
+                      <strong className="text-sm font-display text-on-surface">
+                        {selectedPlace.name}
+                      </strong>
+                      {selectedPlace.state && (
+                        <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-surface-container border border-outline-variant text-on-surface-variant">
+                          {selectedPlace.state}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-on-surface-variant font-mono">
+                      GPS: {selectedPlace.lat.toFixed(4)}° N, {selectedPlace.lng.toFixed(4)}° E
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <Link
+                      href={`/risk-map?lat=${selectedPlace.lat}&lng=${selectedPlace.lng}&label=${encodeURIComponent(
+                        selectedPlace.name
+                      )}`}
+                      className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-semibold hover:bg-primary/90 transition-all shadow-md"
+                    >
+                      <span className="material-symbols-outlined text-sm">map</span>
+                      <span>View Risk Map</span>
+                    </Link>
+                    <Link
+                      href={`/plan-journey?fromLat=${selectedPlace.lat}&fromLng=${selectedPlace.lng}&fromName=${encodeURIComponent(
+                        selectedPlace.name
+                      )}`}
+                      className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-surface-container border border-outline-variant text-xs font-semibold text-on-surface hover:bg-surface-container-highest transition-all"
+                    >
+                      <span className="material-symbols-outlined text-sm">alt_route</span>
+                      <span>Plan Route</span>
+                    </Link>
+                    <Link
+                      href={`/report-hazard?lat=${selectedPlace.lat}&lng=${selectedPlace.lng}&location=${encodeURIComponent(
+                        selectedPlace.formattedAddress
+                      )}`}
+                      className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container border border-outline-variant text-xs font-semibold text-error hover:bg-surface-container-highest transition-all"
+                    >
+                      <span className="material-symbols-outlined text-sm">crisis_alert</span>
+                      <span>Report</span>
+                    </Link>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* CTA Buttons */}
             <div className="flex flex-wrap items-center gap-3 pt-2">
@@ -78,7 +186,7 @@ export default function LandingPage() {
                     {stats.activeHazards}
                   </span>
                   <span className="text-xs text-secondary-container font-medium">
-                    +4 in past hour
+                    {stats.underReview} awaiting review
                   </span>
                 </div>
               </div>
@@ -97,7 +205,9 @@ export default function LandingPage() {
                   <span className="text-3xl font-display font-bold text-error tabular-nums">
                     {stats.highSeverity}
                   </span>
-                  <span className="text-xs text-error font-medium">Critical pass blocked</span>
+                  <span className="text-xs text-error font-medium">
+                    {stats.unverified} citizen reports
+                  </span>
                 </div>
               </div>
               <div className="w-12 h-12 rounded-lg bg-surface-container flex items-center justify-center border border-error/30 text-error">
@@ -115,7 +225,9 @@ export default function LandingPage() {
                   <span className="text-3xl font-display font-bold text-tertiary tabular-nums">
                     {stats.resolved}
                   </span>
-                  <span className="text-xs text-tertiary font-medium">Water receded</span>
+                  <span className="text-xs text-tertiary font-medium">
+                    {stats.totalToday} total in session
+                  </span>
                 </div>
               </div>
               <div className="w-12 h-12 rounded-lg bg-surface-container flex items-center justify-center border border-outline-variant text-tertiary">
@@ -129,11 +241,16 @@ export default function LandingPage() {
         <section className="space-y-3" id="map-preview">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div>
-              <h2 className="text-xl sm:text-2xl font-display font-bold text-on-surface">
-                Monsoon Hazard Canvas
-              </h2>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-xl sm:text-2xl font-display font-bold text-on-surface">
+                  Monsoon Hazard Canvas
+                </h2>
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-tertiary/20 text-tertiary border border-tertiary/40">
+                  SIMULATED PREVIEW PINS
+                </span>
+              </div>
               <p className="text-xs sm:text-sm text-on-surface-variant">
-                Live sector telemetry & spatial waterlogging coordinate matrix
+                Illustrative preview canvas showing sample urban hazard topology. Full spatial coordinates available on interactive Risk Map.
               </p>
             </div>
             <div className="flex items-center gap-3 text-xs">
@@ -195,11 +312,13 @@ export default function LandingPage() {
 
             <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-surface-dim/80 via-transparent to-transparent"></div>
 
-            {/* Interactive Pins */}
+            {/* Interactive Pins (Accessible Buttons F-23) */}
             {/* Pin 1: High Risk (#FLD-084) */}
-            <div
+            <button
+              type="button"
+              aria-label="Select critical hazard pin #FLD-084"
               onClick={() => setActivePinId('#FLD-084')}
-              className="absolute top-[42%] left-[44%] -translate-x-1/2 -translate-y-1/2 group cursor-pointer z-20"
+              className="absolute top-[42%] left-[44%] -translate-x-1/2 -translate-y-1/2 group cursor-pointer z-20 focus:outline-none focus-visible:ring-2 focus-visible:ring-error"
             >
               <div className="relative flex items-center justify-center">
                 <span className="animate-ping absolute inline-flex h-8 w-8 rounded-full bg-error opacity-40"></span>
@@ -211,12 +330,14 @@ export default function LandingPage() {
                   <span className="material-symbols-outlined text-sm font-bold">report</span>
                 </div>
               </div>
-            </div>
+            </button>
 
             {/* Pin 2: High Risk (#FLD-071) */}
-            <div
+            <button
+              type="button"
+              aria-label="Select critical hazard pin #FLD-071"
               onClick={() => setActivePinId('#FLD-071')}
-              className="absolute top-[32%] left-[68%] -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group"
+              className="absolute top-[32%] left-[68%] -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group focus:outline-none focus-visible:ring-2 focus-visible:ring-error"
             >
               <div className="relative flex items-center justify-center">
                 <span className="animate-ping absolute inline-flex h-6 w-6 rounded-full bg-error opacity-30"></span>
@@ -228,12 +349,14 @@ export default function LandingPage() {
                   <span className="material-symbols-outlined text-xs">warning</span>
                 </div>
               </div>
-            </div>
+            </button>
 
             {/* Pin 3: Moderate Risk (#FLD-063) */}
-            <div
+            <button
+              type="button"
+              aria-label="Select moderate hazard pin #FLD-063"
               onClick={() => setActivePinId('#FLD-063')}
-              className="absolute top-[65%] left-[30%] -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group"
+              className="absolute top-[65%] left-[30%] -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             >
               <div
                 className={`w-6 h-6 rounded-full bg-surface-container-lowest border-2 border-amber-400 flex items-center justify-center text-amber-400 shadow-md transition-transform group-hover:scale-110 ${
@@ -242,12 +365,14 @@ export default function LandingPage() {
               >
                 <span className="material-symbols-outlined text-xs">water_loss</span>
               </div>
-            </div>
+            </button>
 
             {/* Pin 4: Unverified (#FLD-091) */}
-            <div
+            <button
+              type="button"
+              aria-label="Select unverified hazard pin #FLD-091"
               onClick={() => setActivePinId('#FLD-091')}
-              className="absolute top-[60%] left-[75%] -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group"
+              className="absolute top-[60%] left-[75%] -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <div
                 className={`w-6 h-6 rounded-full bg-surface-container-lowest border-2 border-primary flex items-center justify-center text-primary shadow-sm transition-transform group-hover:scale-110 ${
@@ -256,7 +381,7 @@ export default function LandingPage() {
               >
                 <span className="material-symbols-outlined text-[11px]">help</span>
               </div>
-            </div>
+            </button>
 
             {/* Floating Overlay Card (Selected Hazard Callout) */}
             <div className="absolute top-4 left-4 max-w-sm w-[calc(100%-2rem)] sm:w-80 bg-surface-container-low/95 backdrop-blur-md border border-outline-variant rounded-xl p-4 shadow-2xl z-30">
@@ -331,7 +456,9 @@ export default function LandingPage() {
                   {selectedIncident.verifiedCount} Confirms
                 </span>
                 <Link
-                  href="/risk-map"
+                  href={`/risk-map?lat=${selectedIncident.coordinates.lat}&lng=${selectedIncident.coordinates.lng}&label=${encodeURIComponent(
+                    selectedIncident.location
+                  )}`}
                   className="text-primary text-xs font-semibold hover:underline flex items-center gap-0.5"
                 >
                   Drilldown <span className="material-symbols-outlined text-xs">chevron_right</span>
@@ -411,16 +538,15 @@ export default function LandingPage() {
                   02
                 </div>
                 <h3 className="text-base font-display font-bold text-on-surface">
-                  2. AI & Sensor Validation
+                  2. Open-Meteo & Risk Scoring
                 </h3>
                 <p className="text-xs text-on-surface-variant leading-relaxed">
-                  Incoming crowd data is cross-referenced with ultrasonic canal depth gauges, sewer
-                  outflow sensors, and municipal weather radar stations.
+                  Incoming crowd data is scored against Open-Meteo precipitation telemetry, roadway vulnerability factors, and community corroborations.
                 </p>
               </div>
               <div className="pt-3 border-t border-outline-variant/50 flex items-center gap-1.5 text-xs text-secondary">
                 <span className="material-symbols-outlined text-sm">hub</span>
-                <span>Multi-source consensus checking</span>
+                <span>Deterministic risk scoring</span>
               </div>
             </div>
 
@@ -453,12 +579,16 @@ export default function LandingPage() {
               <span className="material-symbols-outlined text-xl">sensors</span>
             </div>
             <div>
-              <h4 className="font-display font-bold text-sm sm:text-base text-on-surface">
-                Telemetry Gateway Online
-              </h4>
-              <p className="text-xs text-on-surface-variant">
-                Monitoring 142 hydrological stations across Delta Basin Zone 4. Ingest latency
-                410ms.
+              <div className="flex items-center gap-2">
+                <h4 className="font-display font-bold text-sm sm:text-base text-on-surface">
+                  Data Pipeline Active
+                </h4>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-tertiary/20 text-tertiary border border-tertiary/30 font-mono font-bold">
+                  LIVE TELEMETRY
+                </span>
+              </div>
+              <p className="text-xs text-on-surface-variant mt-0.5">
+                Connected to Open-Meteo meteorological telemetry, Mappls search, and OSRM routing. {stats.activeHazards} active hazard reports indexed in session.
               </p>
             </div>
           </div>
