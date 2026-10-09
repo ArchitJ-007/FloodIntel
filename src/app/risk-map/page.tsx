@@ -5,7 +5,9 @@ import Link from 'next/link';
 import { TopNavBar } from '@/components/TopNavBar';
 import { SeverityBadge } from '@/components/SeverityBadge';
 import { StatusBadge } from '@/components/StatusBadge';
-import { useIncidents, Incident } from '@/context/IncidentContext';
+import { useIncidents, Incident, normalizeSeverity } from '@/context/IncidentContext';
+import { useWeather } from '@/hooks/useWeather';
+import { calculateRiskScore } from '@/lib/riskEngine';
 
 export default function RiskMapPage() {
   const { incidents, selectedIncident, setSelectedIncidentId, stats } = useIncidents();
@@ -32,6 +34,34 @@ export default function RiskMapPage() {
   const [showTraffic, setShowTraffic] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [sharedAlertMessage, setSharedAlertMessage] = useState<string | null>(null);
+
+  // Live Weather Telemetry (Open-Meteo) for configured city coordinates (Koramangala, Sector 4 Basin)
+  const cityCoordinates = useMemo(() => ({ lat: 12.9352, lng: 77.6245 }), []);
+  const {
+    weather,
+    isLoading: isWeatherLoading,
+    error: weatherError,
+    refetch: refetchWeather,
+  } = useWeather(cityCoordinates.lat, cityCoordinates.lng);
+
+  // Dynamically re-evaluate selected incident risk when local weather telemetry is available
+  const evaluatedSelectedRisk = useMemo(() => {
+    if (!selectedIncident) return null;
+    const isNearbyWeather =
+      weather &&
+      Math.abs(weather.coordinates.lat - selectedIncident.coordinates.lat) <= 0.05 &&
+      Math.abs(weather.coordinates.lng - selectedIncident.coordinates.lng) <= 0.05;
+
+    return calculateRiskScore({
+      severity: normalizeSeverity(selectedIncident.severity),
+      depthCm: selectedIncident.depthCm,
+      rainRiskIndex: isNearbyWeather ? weather.rainRiskIndex : null,
+      reportedTimestamp: selectedIncident.reportedTimestamp,
+      corroborationCount: selectedIncident.corroborationCount,
+      verificationStatus: selectedIncident.verificationStatus,
+      provenance: selectedIncident.provenance,
+    });
+  }, [selectedIncident, weather]);
 
   // Filtered incidents
   const filteredIncidents = useMemo(() => {
@@ -125,17 +155,71 @@ export default function RiskMapPage() {
               </span>
             </div>
 
-            {/* Weather Telemetry Pill */}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-surface-container-high border border-outline-variant text-xs text-on-surface">
-              <span className="material-symbols-outlined text-secondary text-base">rainy</span>
-              <span className="font-mono">
-                Rainfall: <strong className="text-secondary font-bold">42mm/hr</strong>
-              </span>
-              <span className="text-outline-variant">•</span>
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-error/20 text-error border border-error/30 uppercase tracking-wide">
-                Risk: Elevated
-              </span>
-            </div>
+            {/* Live Weather Telemetry Pill (Open-Meteo) */}
+            {isWeatherLoading ? (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-surface-container-high border border-outline-variant text-xs text-on-surface animate-pulse">
+                <span className="material-symbols-outlined text-secondary text-base animate-spin">sync</span>
+                <span className="font-mono text-outline">Ingesting Open-Meteo...</span>
+              </div>
+            ) : weatherError ? (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-surface-container-high border border-error/30 text-xs text-error">
+                <span className="material-symbols-outlined text-base">cloud_off</span>
+                <span>Weather Telemetry Offline</span>
+                <button
+                  onClick={refetchWeather}
+                  className="text-primary hover:underline font-mono text-[11px] ml-1"
+                  title="Retry fetching weather telemetry"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : weather ? (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-surface-container-high border border-outline-variant text-xs text-on-surface">
+                <span className="material-symbols-outlined text-secondary text-base">
+                  {weather.current.precipitationMmPerHour && weather.current.precipitationMmPerHour > 0
+                    ? 'rainy'
+                    : 'cloud'}
+                </span>
+                <span className="font-mono">
+                  {weather.intensityCategoryLabel}:{' '}
+                  <strong className="text-secondary font-bold">
+                    {weather.current.precipitationMmPerHour !== null
+                      ? `${weather.current.precipitationMmPerHour}mm/h`
+                      : '0mm/h'}
+                  </strong>
+                  {weather.current.temperatureC !== null && (
+                    <span className="text-on-surface-variant font-normal ml-1">
+                      ({weather.current.temperatureC}°C)
+                    </span>
+                  )}
+                </span>
+                <span className="text-outline-variant">•</span>
+                <span
+                  className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide border ${
+                    weather.rainRiskCategory === 'high'
+                      ? 'bg-error/20 text-error border-error/30'
+                      : weather.rainRiskCategory === 'moderate'
+                      ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                      : 'bg-primary/20 text-primary border-primary/30'
+                  }`}
+                  title={`Rain Risk Index: ${weather.rainRiskIndex}/100`}
+                >
+                  Rain Risk: {weather.rainRiskCategory}
+                </span>
+                {weather.isStale && (
+                  <span className="text-[10px] text-amber-400 font-mono px-1 rounded bg-amber-500/10 border border-amber-500/30">
+                    Stale
+                  </span>
+                )}
+                <button
+                  onClick={refetchWeather}
+                  className="text-outline hover:text-primary transition-colors ml-0.5"
+                  title={`Updated ${weather.providerTimestamp}. Click to refresh.`}
+                >
+                  <span className="material-symbols-outlined text-sm">refresh</span>
+                </button>
+              </div>
+            ) : null}
           </div>
         </div>
       </section>
@@ -340,95 +424,105 @@ export default function RiskMapPage() {
                 </div>
 
                 {/* Deterministic Risk Engine Score Card */}
-                <div className="bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/60 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-outline uppercase font-semibold tracking-wider">
-                      Deterministic Risk Score
-                    </span>
-                    <span className="text-[10px] font-mono text-on-surface-variant">
-                      Confidence:{' '}
-                      <strong className="text-on-surface uppercase">
-                        {selectedIncident.confidence}
-                      </strong>
-                    </span>
-                  </div>
-                  <div className="flex items-baseline justify-between">
-                    <div className="flex items-baseline gap-1.5">
-                      <span
-                        className={`text-2xl font-display font-bold tabular-nums font-mono ${
-                          selectedIncident.riskCategory === 'high'
-                            ? 'text-error'
-                            : selectedIncident.riskCategory === 'moderate'
-                            ? 'text-amber-400'
-                            : selectedIncident.riskCategory === 'low'
-                            ? 'text-primary'
-                            : 'text-outline'
-                        }`}
-                      >
-                        {selectedIncident.riskScore !== null ? selectedIncident.riskScore : 'N/A'}
-                      </span>
-                      <span className="text-xs text-outline font-mono">/ 100</span>
-                    </div>
-                    <span
-                      className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
-                        selectedIncident.riskCategory === 'high'
-                          ? 'bg-error/15 text-error border-error/30'
-                          : selectedIncident.riskCategory === 'moderate'
-                          ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                          : selectedIncident.riskCategory === 'low'
-                          ? 'bg-primary/15 text-primary border-primary/30'
-                          : 'bg-surface-container-highest text-outline border-outline-variant'
-                      }`}
-                    >
-                      {selectedIncident.riskCategory} Risk
-                    </span>
-                  </div>
+                {(() => {
+                  const displayRiskScore = evaluatedSelectedRisk ? evaluatedSelectedRisk.score : selectedIncident.riskScore;
+                  const displayCategory = evaluatedSelectedRisk ? evaluatedSelectedRisk.category : selectedIncident.riskCategory;
+                  const displayConfidence = evaluatedSelectedRisk ? evaluatedSelectedRisk.confidence : selectedIncident.confidence;
+                  const displayBreakdown = evaluatedSelectedRisk ? evaluatedSelectedRisk.breakdown : selectedIncident.scoreBreakdown;
+                  const displayWarnings = evaluatedSelectedRisk ? evaluatedSelectedRisk.warnings : selectedIncident.warnings;
 
-                  {/* 5-Component Score Breakdown */}
-                  {selectedIncident.scoreBreakdown && (
-                    <div className="space-y-1 pt-1.5 border-t border-outline-variant/40 text-[10px]">
-                      <div className="flex justify-between text-on-surface-variant font-mono">
-                        <span>Severity (S)</span>
-                        <span>{selectedIncident.scoreBreakdown.severity.contribution} pts</span>
-                      </div>
-                      <div className="flex justify-between text-on-surface-variant font-mono">
-                        <span>Rain Telemetry (R)</span>
-                        <span>
-                          {selectedIncident.scoreBreakdown.rain.available
-                            ? `${selectedIncident.scoreBreakdown.rain.contribution} pts`
-                            : 'Renormalized (N/A)'}
+                  return (
+                    <div className="bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/60 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-outline uppercase font-semibold tracking-wider">
+                          Deterministic Risk Score
+                        </span>
+                        <span className="text-[10px] font-mono text-on-surface-variant">
+                          Confidence:{' '}
+                          <strong className="text-on-surface uppercase">
+                            {displayConfidence}
+                          </strong>
                         </span>
                       </div>
-                      <div className="flex justify-between text-on-surface-variant font-mono">
-                        <span>Recency Half-Life (T)</span>
-                        <span>{selectedIncident.scoreBreakdown.recency.contribution} pts</span>
-                      </div>
-                      <div className="flex justify-between text-on-surface-variant font-mono">
-                        <span>Corroboration (C)</span>
-                        <span>{selectedIncident.scoreBreakdown.corroboration.contribution} pts</span>
-                      </div>
-                      <div className="flex justify-between text-on-surface-variant font-mono">
-                        <span>Spatial History (H)</span>
-                        <span>{selectedIncident.scoreBreakdown.hotspotHistory.contribution} pts</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Warnings / Caveats */}
-                  {selectedIncident.warnings && selectedIncident.warnings.length > 0 && (
-                    <div className="pt-1.5 border-t border-outline-variant/40 space-y-1">
-                      {selectedIncident.warnings.map((warn, idx) => (
-                        <div
-                          key={idx}
-                          className="text-[10px] text-outline leading-tight flex items-start gap-1"
-                        >
-                          <span className="text-secondary shrink-0">•</span>
-                          <span>{warn}</span>
+                      <div className="flex items-baseline justify-between">
+                        <div className="flex items-baseline gap-1.5">
+                          <span
+                            className={`text-2xl font-display font-bold tabular-nums font-mono ${
+                              displayCategory === 'high'
+                                ? 'text-error'
+                                : displayCategory === 'moderate'
+                                ? 'text-amber-400'
+                                : displayCategory === 'low'
+                                ? 'text-primary'
+                                : 'text-outline'
+                            }`}
+                          >
+                            {displayRiskScore !== null ? displayRiskScore : 'N/A'}
+                          </span>
+                          <span className="text-xs text-outline font-mono">/ 100</span>
                         </div>
-                      ))}
+                        <span
+                          className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
+                            displayCategory === 'high'
+                              ? 'bg-error/15 text-error border-error/30'
+                              : displayCategory === 'moderate'
+                              ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                              : displayCategory === 'low'
+                              ? 'bg-primary/15 text-primary border-primary/30'
+                              : 'bg-surface-container-highest text-outline border-outline-variant'
+                          }`}
+                        >
+                          {displayCategory} Risk
+                        </span>
+                      </div>
+
+                      {/* 5-Component Score Breakdown */}
+                      {displayBreakdown && (
+                        <div className="space-y-1 pt-1.5 border-t border-outline-variant/40 text-[10px]">
+                          <div className="flex justify-between text-on-surface-variant font-mono">
+                            <span>Severity (S)</span>
+                            <span>{displayBreakdown.severity.contribution} pts</span>
+                          </div>
+                          <div className="flex justify-between text-on-surface-variant font-mono">
+                            <span>Rain Telemetry (R)</span>
+                            <span className={displayBreakdown.rain.available ? 'text-secondary font-bold' : ''}>
+                              {displayBreakdown.rain.available
+                                ? `${displayBreakdown.rain.contribution} pts (Open-Meteo)`
+                                : 'Renormalized (N/A)'}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-on-surface-variant font-mono">
+                            <span>Recency Half-Life (T)</span>
+                            <span>{displayBreakdown.recency.contribution} pts</span>
+                          </div>
+                          <div className="flex justify-between text-on-surface-variant font-mono">
+                            <span>Corroboration (C)</span>
+                            <span>{displayBreakdown.corroboration.contribution} pts</span>
+                          </div>
+                          <div className="flex justify-between text-on-surface-variant font-mono">
+                            <span>Spatial History (H)</span>
+                            <span>{displayBreakdown.hotspotHistory.contribution} pts</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Warnings / Caveats */}
+                      {displayWarnings && displayWarnings.length > 0 && (
+                        <div className="pt-1.5 border-t border-outline-variant/40 space-y-1">
+                          {displayWarnings.map((warn, idx) => (
+                            <div
+                              key={idx}
+                              className="text-[10px] text-outline leading-tight flex items-start gap-1"
+                            >
+                              <span className="text-secondary shrink-0">•</span>
+                              <span>{warn}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  );
+                })()}
 
                 {/* Hazard Type & Depth */}
                 <div className="grid grid-cols-2 gap-2 bg-surface-container-low p-2.5 rounded-lg border border-outline-variant/40">
