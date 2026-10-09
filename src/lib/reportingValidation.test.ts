@@ -121,6 +121,18 @@ const invalidCoordsLngResult = validateHazardReport({
 });
 assert(!invalidCoordsLngResult.isValid, 'Rejects longitude > 180');
 
+// Missing coordinates validation (PRD F-08: missing coords must error, not fallback to Bengaluru)
+const missingCoordsInputResult = validateHazardReport({
+  description: 'Water is accumulating rapidly near the flyover ramp.',
+  location: 'Silk Board Junction',
+  coordinates: undefined,
+  hazardType: 'standing_water',
+  severity: 'moderate',
+  waterDepth: 'knee_deep',
+});
+assert(!missingCoordsInputResult.isValid, 'Rejects missing coordinates without falling back to Bengaluru');
+assert(!!missingCoordsInputResult.errors.coordinates, 'Provides coordinates field error when coordinates are omitted');
+
 // Invalid enums
 const invalidEnumResult = validateHazardReport({
   description: 'Water is accumulating rapidly near the flyover ramp.',
@@ -343,7 +355,7 @@ const mockActiveIncidents: Incident[] = [
   } as unknown as Incident,
 ];
 
-// Test 5A: Matching duplicate candidate (< 250m, < 180min, matching category & location)
+// Test 5A: Matching duplicate candidate (< 120m, < 90min, matching category & location)
 const duplicateCandidate = {
   description: 'Deep standing water at Silk Board Junction flyover blocking buses',
   location: 'Silk Board Junction',
@@ -355,8 +367,8 @@ const duplicateCandidate = {
 const dupResult = detectDuplicateReport(duplicateCandidate, mockActiveIncidents, baseNow);
 assert(dupResult.isDuplicateCandidate, 'Detects matching duplicate near Silk Board');
 assert(dupResult.match?.id === 'INC-DEMO-001', 'Correctly matches active incident INC-DEMO-001');
-assert(dupResult.match?.distanceM !== undefined && dupResult.match.distanceM < 250, 'Distance is within 250m threshold');
-assert(dupResult.match?.minutesAgo !== undefined && dupResult.match.minutesAgo <= 35, 'Age is within 180min threshold');
+assert(dupResult.match?.distanceM !== undefined && dupResult.match.distanceM < 120, 'Distance is within 120m threshold');
+assert(dupResult.match?.minutesAgo !== undefined && dupResult.match.minutesAgo <= 90, 'Age is within 90min threshold');
 
 // Test 5B: Unrelated nearby report with different category and non-overlapping keywords
 const unrelatedNearbyCandidate = {
@@ -372,21 +384,39 @@ assert(
   'Does not flag unrelated nearby event with different category & no flood keyword overlap'
 );
 
-// Test 5C: Distant report (> 250m) with identical category & description
+// Test 5B2: Common stopwords like "water", "flood" do not trigger duplicate for distinct category/junction
+const commonWordsCandidate = {
+  description: 'Heavy water flood accumulation at junction',
+  location: 'Koramangala 8th Block',
+  coordinates: { lat: 12.9180, lng: 77.6238 }, // ~70m away
+  hazardType: 'blocked_road', // Different hazard category
+  severity: 'low',
+};
+const commonWordsResult = detectDuplicateReport(commonWordsCandidate, mockActiveIncidents, baseNow);
+assert(
+  !commonWordsResult.isDuplicateCandidate,
+  'Common stopwords like "water", "flood" do not falsely trigger duplicate for distinct category'
+);
+
+// Test 5C: Distant report (> 120m) with identical category & description
 const distantCandidate = {
   description: 'Deep standing water at Silk Board Junction flyover blocking buses',
   location: 'Silk Board Outer Area',
-  coordinates: { lat: 12.9220, lng: 77.6280 }, // ~700m away (> 250m threshold)
+  coordinates: { lat: 12.9220, lng: 77.6280 }, // ~700m away (> 120m threshold)
   hazardType: 'waterlogging',
   severity: 'moderate',
 };
 const distantResult = detectDuplicateReport(distantCandidate, mockActiveIncidents, baseNow);
-assert(!distantResult.isDuplicateCandidate, 'Rejects distant report (> 250m) despite same category and text');
+assert(!distantResult.isDuplicateCandidate, 'Rejects distant report (> 120m) despite same category and text');
 
-// Test 5D: Same location, but existing incident is older than threshold (> 180 min)
-const oldIncidentOnly: Incident[] = [mockActiveIncidents[3]];
-const oldResult = detectDuplicateReport(duplicateCandidate, oldIncidentOnly, baseNow);
-assert(!oldResult.isDuplicateCandidate, 'Does not match incident older than 180 minutes');
+// Test 5D: Same location, but existing incident is older than 90 min threshold
+const incident100MinAgo: Incident = {
+  ...mockActiveIncidents[0],
+  reportedTimestamp: baseNow - 100 * 60 * 1000, // 100 mins ago
+  createdAt: baseNow - 100 * 60 * 1000,
+};
+const oldResult = detectDuplicateReport(duplicateCandidate, [incident100MinAgo], baseNow);
+assert(!oldResult.isDuplicateCandidate, 'Does not match incident older than 90 minutes');
 
 // Test 5E: Same location, but existing incident is already marked RESOLVED
 const resolvedIncidentOnly: Incident[] = [mockActiveIncidents[2]];
@@ -404,29 +434,29 @@ const missingCoordsCandidate = {
 const missingCoordsResult = detectDuplicateReport(missingCoordsCandidate, mockActiveIncidents, baseNow);
 assert(!missingCoordsResult.isDuplicateCandidate, 'Gracefully returns false when candidate coordinates are missing');
 
-// Test 5G: Boundary testing (at 240m vs 265m)
-// 1 degree lat is ~111,139m. 240m is 240 / 111139 = 0.002159 deg. 265m is 265 / 111139 = 0.002384 deg.
+// Test 5G: Boundary testing (at 100m < 120m vs 140m > 120m)
+// 1 degree lat is ~111,139m. 100m is 100 / 111139 = 0.0008997 deg. 140m is 140 / 111139 = 0.001259 deg.
 const boundaryInsideCandidate = {
-  description: 'Waterlogging at Silk Board Junction',
+  description: 'Waterlogging at Silk Board Junction flyover',
   location: 'Silk Board Junction',
-  coordinates: { lat: 12.9175 + (240 / 111139), lng: 77.6234 }, // ~240m away
+  coordinates: { lat: 12.9175 + (100 / 111139), lng: 77.6234 }, // ~100m away
   hazardType: 'waterlogging',
   severity: 'moderate',
 };
 const boundaryInsideResult = detectDuplicateReport(boundaryInsideCandidate, [mockActiveIncidents[0]], baseNow);
 assert(
   boundaryInsideResult.isDuplicateCandidate,
-  `Boundary inside (dist=${Math.round(boundaryInsideResult.match!.distanceM)}m < 250m) is flagged`
+  `Boundary inside (dist=${Math.round(boundaryInsideResult.match!.distanceM)}m < 120m) is flagged`
 );
 
 const boundaryOutsideCandidate = {
-  description: 'Waterlogging at Silk Board Junction',
+  description: 'Waterlogging at Silk Board Junction flyover',
   location: 'Silk Board Junction',
-  coordinates: { lat: 12.9175 + (265 / 111139), lng: 77.6234 }, // ~265m away
+  coordinates: { lat: 12.9175 + (140 / 111139), lng: 77.6234 }, // ~140m away
   hazardType: 'waterlogging',
   severity: 'moderate',
 };
 const boundaryOutsideResult = detectDuplicateReport(boundaryOutsideCandidate, [mockActiveIncidents[0]], baseNow);
-assert(!boundaryOutsideResult.isDuplicateCandidate, 'Boundary outside (> 250m) is not flagged');
+assert(!boundaryOutsideResult.isDuplicateCandidate, 'Boundary outside (> 120m) is not flagged');
 
 console.log('\n✨ ALL REPORTING VALIDATION & DUPLICATE DETECTION TESTS PASSED SUCCESSFULLY! ✨');

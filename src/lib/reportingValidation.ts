@@ -31,9 +31,9 @@ export const REPORT_VALIDATION_CONFIG = {
   },
   // Configurable duplicate matching thresholds (PRD FR-REP-05)
   duplicateThresholds: {
-    maxDistanceM: 250, // Proximity threshold: reports within 250m are checked
-    maxAgeMinutes: 180, // Recency threshold: active reports within 3 hours
-    strictMatchDistanceM: 60, // Immediate proximity: highly probable duplicate
+    maxDistanceM: 120, // PRD FR-REP-05 Proximity threshold: reports within 120m are checked
+    maxAgeMinutes: 90, // PRD FR-REP-05 Recency threshold: active reports within 90 minutes
+    strictMatchDistanceM: 40, // Immediate proximity: highly probable duplicate
   },
 };
 
@@ -173,26 +173,23 @@ export function validateHazardReport(input: HazardReportInput): ValidationResult
   const lat = input.coordinates?.lat;
   const lng = input.coordinates?.lng;
 
-  let resolvedCoords = { lat: 12.9352, lng: 77.6245 }; // Default to Sector 4 Basin center if omitted
+  let resolvedCoords: { lat: number; lng: number } | undefined = undefined;
 
-  if (lat !== undefined && lng !== undefined) {
-    if (typeof lat !== 'number' || isNaN(lat) || lat < -90 || lat > 90) {
-      errors.coordinates = `Latitude must be a valid number between -90 and 90 (received: ${lat}).`;
-    }
-    if (typeof lng !== 'number' || isNaN(lng) || lng < -180 || lng > 180) {
-      errors.coordinates = `Longitude must be a valid number between -180 and 180 (received: ${lng}).`;
-    }
+  if (lat === undefined || lng === undefined || lat === null || lng === null) {
+    errors.coordinates = 'Location coordinates are required. Please select a verified landmark or address from the search suggestions.';
+  } else if (typeof lat !== 'number' || isNaN(lat) || lat < -90 || lat > 90) {
+    errors.coordinates = `Latitude must be a valid number between -90 and 90 (received: ${lat}).`;
+  } else if (typeof lng !== 'number' || isNaN(lng) || lng < -180 || lng > 180) {
+    errors.coordinates = `Longitude must be a valid number between -180 and 180 (received: ${lng}).`;
+  } else {
+    resolvedCoords = { lat: Number(lat.toFixed(5)), lng: Number(lng.toFixed(5)) };
 
-    if (!errors.coordinates) {
-      resolvedCoords = { lat: Number(lat.toFixed(5)), lng: Number(lng.toFixed(5)) };
-
-      // Geographic boundary check (Republic of India)
-      const b = REPORT_VALIDATION_CONFIG.indiaBounds;
-      if (lat < b.minLat || lat > b.maxLat || lng < b.minLng || lng > b.maxLng) {
-        warnings.push(
-          `Coordinates (${lat.toFixed(4)}, ${lng.toFixed(4)}) lie outside standard national monitoring bounds for India. Report will be logged with international coordination.`
-        );
-      }
+    // Geographic boundary check (Republic of India)
+    const b = REPORT_VALIDATION_CONFIG.indiaBounds;
+    if (lat < b.minLat || lat > b.maxLat || lng < b.minLng || lng > b.maxLng) {
+      warnings.push(
+        `Coordinates (${lat.toFixed(4)}, ${lng.toFixed(4)}) lie outside standard national monitoring bounds for India. Report will be logged with international coordination.`
+      );
     }
   }
 
@@ -258,10 +255,24 @@ export function detectDuplicateReport(
   const { maxDistanceM, maxAgeMinutes, strictMatchDistanceM } =
     REPORT_VALIDATION_CONFIG.duplicateThresholds;
 
+  // PRD F-09: Common flood words like "water", "flood", "heavy" must not falsely trigger duplicates
+  const GENERIC_FLOOD_STOPWORDS = new Set([
+    'water', 'waters', 'flood', 'flooded', 'flooding', 'heavy', 'road', 'street',
+    'overflow', 'waterlogging', 'waterlogged', 'area', 'traffic', 'junction',
+    'lane', 'near', 'front', 'cross', 'main', 'deep', 'depth', 'stalled', 'accumulation'
+  ]);
+
   const candidateKeywords = (candidate.description || '')
     .toLowerCase()
     .split(/[\s,.-]+/)
-    .filter((w) => w.length > 4);
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 4 && !GENERIC_FLOOD_STOPWORDS.has(w));
+
+  const candidateLocationKeywords = (candidate.location || '')
+    .toLowerCase()
+    .split(/[\s,.-]+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 4 && !GENERIC_FLOOD_STOPWORDS.has(w));
 
   for (const existing of existingIncidents) {
     // 1. Skip resolved incidents (not an active duplicate)
@@ -292,7 +303,7 @@ export function detectDuplicateReport(
     if (ageMin > maxAgeMinutes) continue;
 
     // 5. Evaluate Similarity
-    // Case A: Strict proximity (<60m) - almost certainly same physical junction
+    // Case A: Strict proximity (<40m) - almost certainly same physical junction
     if (distM <= strictMatchDistanceM) {
       return {
         isDuplicateCandidate: true,
@@ -309,7 +320,8 @@ export function detectDuplicateReport(
       };
     }
 
-    // Case B: Moderate proximity (60m - 250m) with matching category or keyword overlap
+    // Case B: Moderate proximity (40m - 120m)
+    // Must have matching category AND (meaningful non-generic keyword overlap OR location token overlap)
     const categoryMatch =
       candidate.hazardType &&
       existing.hazardType &&
@@ -318,9 +330,10 @@ export function detectDuplicateReport(
         (candidate.hazardType === 'waterlogging' && existing.hazardType === 'flooded_road'));
 
     const existingText = `${existing.title} ${existing.notes || ''} ${existing.location}`.toLowerCase();
-    const hasKeywordOverlap = candidateKeywords.some((kw) => existingText.includes(kw));
+    const hasMeaningfulDescOverlap = candidateKeywords.some((kw) => existingText.includes(kw));
+    const hasLocationTokenOverlap = candidateLocationKeywords.some((kw) => existingText.includes(kw));
 
-    if (categoryMatch || hasKeywordOverlap) {
+    if (categoryMatch && (hasMeaningfulDescOverlap || hasLocationTokenOverlap)) {
       return {
         isDuplicateCandidate: true,
         match: {
@@ -331,7 +344,7 @@ export function detectDuplicateReport(
           minutesAgo: Math.max(1, ageMin),
           severity: existing.severity,
           status: existing.status,
-          reason: `Nearby active incident within ${distM}m with matching hazard profile reported ${ageMin}m ago.`,
+          reason: `Nearby active incident within ${distM}m with matching hazard category and specific location/description reported ${ageMin}m ago.`,
         },
       };
     }

@@ -98,6 +98,7 @@ interface IncidentContextType {
     coordinates?: { lat: number; lng: number };
   }) => Incident;
   updateStatus: (id: string, newStatus: StatusType) => void;
+  verifyIncident: (id: string, newVerificationStatus: VerificationStatus) => void;
   stats: {
     activeHazards: number;
     highSeverity: number;
@@ -105,6 +106,7 @@ interface IncidentContextType {
     totalToday: number;
     underReview: number;
     unverified: number;
+    citizenReportCount: number;
   };
 }
 
@@ -334,9 +336,30 @@ const initialIncidents: Incident[] = [
 
 const IncidentContext = createContext<IncidentContextType | undefined>(undefined);
 
+const LOCAL_STORAGE_REPORTS_KEY = 'floodintel_user_reports_v1';
+
 export function IncidentProvider({ children }: { children: ReactNode }) {
+  const [userReports, setUserReports] = useState<Incident[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>(initialIncidents);
   const [selectedIncidentId, setSelectedIncidentId] = useState<string>('#FLD-084');
+
+  // Hydrate user reports from browser localStorage safely after initial client mount
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const stored = window.localStorage.getItem(LOCAL_STORAGE_REPORTS_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setUserReports(parsed);
+            setIncidents([...parsed, ...initialIncidents]);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to hydrate local reports from localStorage:', err);
+    }
+  }, []);
 
   const selectedIncident = incidents.find((i) => i.id === selectedIncidentId) || incidents[0] || null;
 
@@ -359,6 +382,17 @@ export function IncidentProvider({ children }: { children: ReactNode }) {
     contact?: string;
     coordinates?: { lat: number; lng: number };
   }) => {
+    // PRD F-08: Strictly require coordinates; do not fabricate or default to Bengaluru
+    if (
+      !coordinates ||
+      typeof coordinates.lat !== 'number' ||
+      typeof coordinates.lng !== 'number' ||
+      isNaN(coordinates.lat) ||
+      isNaN(coordinates.lng)
+    ) {
+      throw new Error('Valid geographic coordinates are required to submit an incident report.');
+    }
+
     const randomNum = Math.floor(100 + Math.random() * 900);
     const newId = `#FLD-2025-${randomNum}`;
 
@@ -395,11 +429,20 @@ export function IncidentProvider({ children }: { children: ReactNode }) {
       provenance: 'user',
     });
 
+    // PRD F-21: Derive genuine zone/locality from the selected address instead of hardcoded Sector 4 Basin
+    const locationParts = location.split(',').map((p) => p.trim());
+    const derivedZone =
+      locationParts.length > 2
+        ? locationParts.slice(-2).join(', ')
+        : locationParts.length > 1
+        ? locationParts[1]
+        : 'Local Municipal Corridor';
+
     const newIncident: Incident = {
       id: newId,
-      title: location.split(',')[0] || 'Reported Water Hazard',
+      title: locationParts[0] || 'Reported Water Hazard',
       location: location,
-      zone: 'Sector 4 Basin (Metropolitan Basin)',
+      zone: derivedZone,
       hazardType,
       hazardTypeLabel: labelMap[hazardType] || 'Hazard',
       severity,
@@ -424,15 +467,28 @@ export function IncidentProvider({ children }: { children: ReactNode }) {
       warnings: riskResult.warnings,
       notes: description,
       coordinates: {
-        lat: coordinates?.lat ?? 12.935 + (Math.random() - 0.5) * 0.02,
-        lng: coordinates?.lng ?? 77.62 + (Math.random() - 0.5) * 0.02,
-        xPercent: 35 + Math.floor(Math.random() * 45),
-        yPercent: 35 + Math.floor(Math.random() * 45),
+        lat: coordinates.lat,
+        lng: coordinates.lng,
+        xPercent: 50,
+        yPercent: 50,
       },
     };
 
-    setIncidents((prev) => [newIncident, ...prev]);
+    // Update state
+    const updatedUserReports = [newIncident, ...userReports];
+    setUserReports(updatedUserReports);
+    setIncidents([newIncident, ...incidents]);
     setSelectedIncidentId(newIncident.id);
+
+    // Save to versioned browser localStorage (F-07)
+    try {
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(LOCAL_STORAGE_REPORTS_KEY, JSON.stringify(updatedUserReports));
+      }
+    } catch (e) {
+      console.warn('Could not persist report to localStorage:', e);
+    }
+
     return newIncident;
   };
 
@@ -442,10 +498,47 @@ export function IncidentProvider({ children }: { children: ReactNode }) {
         if (item.id === id) {
           const verificationStatus: VerificationStatus =
             newStatus === 'Resolved' ? 'resolved' : item.verificationStatus;
-          return {
+          const updated = {
             ...item,
             status: newStatus,
             verificationStatus,
+            updatedAt: Date.now(),
+          };
+          return updated;
+        }
+        return item;
+      })
+    );
+  };
+
+  const verifyIncident = (id: string, newVerificationStatus: VerificationStatus) => {
+    setIncidents((prev) =>
+      prev.map((item) => {
+        if (item.id === id) {
+          const newVerifiedCount = item.verifiedCount + (newVerificationStatus === 'verified' ? 1 : 0);
+          const newCorroborationCount = item.corroborationCount + 1;
+
+          // Deterministically recompute canonical risk score with verified status
+          const updatedRisk = calculateRiskScore({
+            severity: normalizeSeverity(item.severity),
+            depthCm: item.depthCm,
+            rainRiskIndex: null,
+            reportedTimestamp: item.reportedTimestamp,
+            corroborationCount: newCorroborationCount,
+            verificationStatus: newVerificationStatus,
+            provenance: item.provenance,
+          });
+
+          return {
+            ...item,
+            verificationStatus: newVerificationStatus,
+            verifiedCount: newVerifiedCount,
+            corroborationCount: newCorroborationCount,
+            riskScore: updatedRisk.score,
+            riskCategory: updatedRisk.category,
+            confidence: updatedRisk.confidence,
+            scoreBreakdown: updatedRisk.breakdown,
+            warnings: updatedRisk.warnings,
             updatedAt: Date.now(),
           };
         }
@@ -462,6 +555,7 @@ export function IncidentProvider({ children }: { children: ReactNode }) {
   const totalToday = incidents.length;
   const underReview = incidents.filter((i) => i.status === 'Under Review').length;
   const unverified = incidents.filter((i) => i.verificationStatus === 'unverified').length;
+  const citizenReportCount = incidents.filter((i) => i.provenance === 'user').length;
 
   return (
     <IncidentContext.Provider
@@ -471,6 +565,7 @@ export function IncidentProvider({ children }: { children: ReactNode }) {
         setSelectedIncidentId,
         addHazard,
         updateStatus,
+        verifyIncident,
         stats: {
           activeHazards,
           highSeverity,
@@ -478,6 +573,7 @@ export function IncidentProvider({ children }: { children: ReactNode }) {
           totalToday,
           underReview,
           unverified,
+          citizenReportCount,
         },
       }}
     >

@@ -8,6 +8,7 @@ interface LocationSearchBoxProps {
   placeholder?: string;
   initialValue?: string;
   onSelect: (place: PlaceResult) => void;
+  onClearOrInvalidate?: () => void;
   className?: string;
   inputClassName?: string;
   autoFocus?: boolean;
@@ -22,6 +23,7 @@ export function LocationSearchBox({
   placeholder = 'Search Indian city, district, or locality (e.g. Mumbai, Delhi, Silk Board)...',
   initialValue = '',
   onSelect,
+  onClearOrInvalidate,
   className = '',
   inputClassName = '',
   autoFocus = false,
@@ -78,23 +80,30 @@ export function LocationSearchBox({
       }
 
       const data = await res.json();
-      const placeList: PlaceResult[] = Array.isArray(data.results) ? data.results : [];
-      setResults(placeList);
-      setIsOpen(true);
-      setActiveIndex(-1);
+      if (abortControllerRef.current === controller) {
+        const placeList: PlaceResult[] = Array.isArray(data.results) ? data.results : [];
+        setResults(placeList);
+        setIsOpen(true);
+        setActiveIndex(-1);
+      }
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
+      if (err.name !== 'AbortError' && abortControllerRef.current === controller) {
         setErrorMessage('Location lookup unavailable.');
         setResults([]);
       }
     } finally {
-      setIsLoading(false);
+      if (abortControllerRef.current === controller) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setQuery(val);
+
+    // PRD F-06: Editing the text after selection invalidates old coordinates
+    onClearOrInvalidate?.();
 
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -133,8 +142,12 @@ export function LocationSearchBox({
       e.preventDefault();
       if (activeIndex >= 0 && activeIndex < results.length) {
         handleSelectPlace(results[activeIndex]);
-      } else if (results.length > 0) {
+      } else if (results.length === 1) {
         handleSelectPlace(results[0]);
+      } else if (results.length > 0) {
+        // Highlight first option rather than blindly selecting mismatched result
+        setActiveIndex(0);
+        setIsOpen(true);
       }
     } else if (e.key === 'Escape') {
       setIsOpen(false);
@@ -146,6 +159,7 @@ export function LocationSearchBox({
     setQuery('');
     setResults([]);
     setIsOpen(false);
+    onClearOrInvalidate?.();
     if (inputRef.current) inputRef.current.focus();
   };
 

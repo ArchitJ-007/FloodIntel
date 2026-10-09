@@ -42,16 +42,22 @@ export function useWeather(lat: number, lng: number): UseWeatherReturn {
       }
 
       const data: WeatherSnapshot = await res.json();
-      setWeather(data);
-      setLastFetchedAt(new Date());
-      setError(null);
+      if (abortControllerRef.current === controller) {
+        setWeather(data);
+        setLastFetchedAt(new Date());
+        setError(null);
+      }
     } catch (err: any) {
       if (err.name === 'AbortError') {
         return; // Ignore intentional abort
       }
-      setError(err.message || 'Failed to load weather telemetry');
+      if (abortControllerRef.current === controller) {
+        setError(err.message || 'Failed to load weather telemetry');
+      }
     } finally {
-      setIsLoading(false);
+      if (abortControllerRef.current === controller) {
+        setIsLoading(false);
+      }
     }
   }, [lat, lng]);
 

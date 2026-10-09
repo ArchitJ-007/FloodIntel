@@ -20,11 +20,19 @@ export async function GET(req: NextRequest) {
 
     const results = await searchPlacesIndia(trimmed);
 
+    const sources = Array.from(new Set(results.map((r) => r.source)));
+    const provider =
+      sources.length > 0
+        ? sources.join('+')
+        : process.env.MAPPLS_API_KEY
+        ? 'mappls/open-meteo'
+        : 'open-meteo';
+
     return NextResponse.json({
       query: trimmed,
       results,
       count: results.length,
-      provider: process.env.MAPPLS_API_KEY ? 'mappls+open-meteo' : 'open-meteo',
+      provider,
     });
   } catch (error: any) {
     console.error('Error in /api/places/search:', error);

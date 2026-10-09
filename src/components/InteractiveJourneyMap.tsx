@@ -101,9 +101,8 @@ export default function InteractiveJourneyMap({
 
     setTileError(null);
 
-    const cartoKey =
-      process.env.NEXT_PUBLIC_CARTO_API_KEY || 'cb1_4f0k_1_3dd561391d386020585e0750';
-    const keyParam = cartoKey ? `?key=${cartoKey}` : '';
+    const cartoKey = process.env.NEXT_PUBLIC_CARTO_API_KEY;
+    const keyParam = cartoKey ? `?key=${encodeURIComponent(cartoKey)}` : '';
 
     const tileUrl =
       mapTheme === 'dark'
@@ -113,6 +112,8 @@ export default function InteractiveJourneyMap({
     const newTileLayer = L.tileLayer(tileUrl, {
       maxZoom: 19,
       subdomains: 'abcd',
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>',
     });
 
     newTileLayer.on('tileerror', () => {
@@ -126,6 +127,17 @@ export default function InteractiveJourneyMap({
     newTileLayer.addTo(map);
     tileLayerRef.current = newTileLayer;
   }, [mapTheme]);
+
+  // Safe HTML escaper for Leaflet DOM interpolation (F-20)
+  const escapeHtml = useCallback((str: string | null | undefined): string => {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }, []);
 
   // Render Routes and Markers
   useEffect(() => {
@@ -157,7 +169,7 @@ export default function InteractiveJourneyMap({
         });
 
         polyline.on('click', () => onSelectRoute(route.id));
-        polyline.bindTooltip(`Route ${route.id}: ${route.name} (${route.durationMin} min)`, {
+        polyline.bindTooltip(`Route ${escapeHtml(route.id)}: ${escapeHtml(route.name)} (${route.durationMin} min)`, {
           sticky: true,
           className: 'floodintel-custom-tooltip',
         });
@@ -194,35 +206,43 @@ export default function InteractiveJourneyMap({
       });
       routeLayers.addLayer(mainLine);
 
-      // 3. Highlight hazardous segments on selected route (PRD FR-RT-05)
-      selectedRoute.hazardousSegments.forEach((seg) => {
-        // Find segment coordinate subset
-        const segLatLngs = latLngs.filter((coord) => {
-          // Approximate segment bounds
-          return true; // Overlay on line
+      // 3. Highlight hazardous segments only for actual localized intervals (F-14)
+      if (selectedRoute.hazardousSegments && selectedRoute.hazardousSegments.length > 0 && latLngs.length > 1) {
+        // Approximate distance along route to find localized segment indices
+        const totalCoords = latLngs.length;
+        selectedRoute.hazardousSegments.forEach((seg) => {
+          if (selectedRoute.distanceKm > 0 && seg.startKm >= 0 && seg.endKm > seg.startKm) {
+            const startRatio = Math.max(0, Math.min(1, seg.startKm / selectedRoute.distanceKm));
+            const endRatio = Math.max(0, Math.min(1, seg.endKm / selectedRoute.distanceKm));
+            const startIdx = Math.floor(startRatio * (totalCoords - 1));
+            const endIdx = Math.min(totalCoords - 1, Math.ceil(endRatio * (totalCoords - 1)) + 1);
+
+            if (endIdx > startIdx) {
+              const segLatLngs = latLngs.slice(startIdx, endIdx + 1);
+              if (segLatLngs.length >= 2) {
+                const hazardOverlay = L.polyline(segLatLngs, {
+                  color: '#dc2626',
+                  weight: 8,
+                  dashArray: '8, 6',
+                  opacity: 0.9,
+                  interactive: false,
+                });
+                routeLayers.addLayer(hazardOverlay);
+              }
+            }
+          }
         });
+      }
 
-        if (segLatLngs.length > 0) {
-          const hazardOverlay = L.polyline(latLngs, {
-            color: '#dc2626',
-            weight: 7,
-            dashArray: '8, 6',
-            opacity: 0.85,
-            interactive: false,
-          });
-          routeLayers.addLayer(hazardOverlay);
-        }
-      });
-
-      // 4. Draw hazard markers along the route (PRD FR-RT-04)
+      // 4. Draw hazard markers along the route (PRD FR-RT-04, sanitized F-20)
       selectedRoute.relevantHazards.forEach((hazard) => {
         const iconHtml = `
           <div class="relative flex flex-col items-center cursor-pointer group">
             <span class="absolute -inset-1.5 rounded-full bg-error/30 animate-ping"></span>
             <div class="px-1.5 py-0.5 rounded font-mono font-bold text-[10px] bg-error text-white border border-white/50 shadow-xl flex items-center gap-1">
               <span class="material-symbols-outlined text-xs">warning</span>
-              <span>${hazard.incidentId}</span>
-              <span class="bg-black/40 text-[8px] px-1 rounded">${hazard.distanceAlongRouteKm} km</span>
+              <span>${escapeHtml(hazard.incidentId)}</span>
+              <span class="bg-black/40 text-[8px] px-1 rounded">${Number(hazard.distanceAlongRouteKm)} km</span>
             </div>
             <div class="w-2 h-2 rotate-45 -mt-1 bg-error"></div>
           </div>
@@ -244,14 +264,14 @@ export default function InteractiveJourneyMap({
         const popupContent = `
           <div style="font-family: inherit; font-size: 12px; color: #0f172a; min-width: 190px; padding: 2px;">
             <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
-              <strong style="color: #ef4444; font-family: monospace;">${hazard.incidentId}</strong>
-              <span style="font-size: 10px; font-weight: bold; color: #64748b;">${hazard.distanceAlongRouteKm} km from start</span>
+              <strong style="color: #ef4444; font-family: monospace;">${escapeHtml(hazard.incidentId)}</strong>
+              <span style="font-size: 10px; font-weight: bold; color: #64748b;">${Number(hazard.distanceAlongRouteKm)} km from start</span>
             </div>
-            <div style="font-weight: 600; margin-bottom: 2px;">${hazard.title}</div>
-            <div style="font-size: 11px; color: #64748b; margin-bottom: 4px;">${hazard.location}</div>
+            <div style="font-weight: 600; margin-bottom: 2px;">${escapeHtml(hazard.title)}</div>
+            <div style="font-size: 11px; color: #64748b; margin-bottom: 4px;">${escapeHtml(hazard.location)}</div>
             <div style="border-top: 1px solid #e2e8f0; padding-top: 4px; font-size: 11px; display: flex; justify-content: space-between;">
-              <span>Depth: <strong>${hazard.depth}</strong></span>
-              <span>Risk: <strong style="color: #ef4444;">${hazard.riskScore}/100</strong></span>
+              <span>Depth: <strong>${escapeHtml(hazard.depth)}</strong></span>
+              <span>Risk: <strong style="color: #ef4444;">${Number(hazard.riskScore)}/100</strong></span>
             </div>
           </div>
         `;
@@ -261,13 +281,14 @@ export default function InteractiveJourneyMap({
       });
     }
 
-    // 5. Draw Origin Pin
+    // 5. Draw Origin Pin (sanitized F-20)
     if (origin) {
       bounds.extend([origin.lat, origin.lng]);
+      const originNameClean = escapeHtml((origin.name || 'Origin').split(',')[0]);
       const originHtml = `
         <div class="relative flex flex-col items-center">
           <div class="px-2 py-0.5 rounded bg-surface-container-high border border-outline text-[11px] font-semibold text-tertiary mb-1 shadow-lg whitespace-nowrap bg-slate-900 text-teal-400 border-teal-500/50">
-            Start: ${(origin.name || 'Origin').split(',')[0]}
+            Start: ${originNameClean}
           </div>
           <div class="w-6 h-6 rounded-full bg-teal-500 border-2 border-white text-white flex items-center justify-center shadow-lg font-bold text-xs">
             <span class="material-symbols-outlined text-[14px]">trip_origin</span>
@@ -283,13 +304,14 @@ export default function InteractiveJourneyMap({
       markerLayers.addLayer(L.marker([origin.lat, origin.lng], { icon: originIcon }));
     }
 
-    // 6. Draw Destination Pin
+    // 6. Draw Destination Pin (sanitized F-20)
     if (destination) {
       bounds.extend([destination.lat, destination.lng]);
+      const destNameClean = escapeHtml((destination.name || 'Destination').split(',')[0]);
       const destHtml = `
         <div class="relative flex flex-col items-center">
           <div class="px-2 py-0.5 rounded bg-surface-container-high border border-outline text-[11px] font-semibold text-on-surface mb-1 shadow-lg whitespace-nowrap bg-slate-900 text-rose-400 border-rose-500/50">
-            End: ${(destination.name || 'Destination').split(',')[0]}
+            End: ${destNameClean}
           </div>
           <div class="w-6 h-6 rounded-full bg-rose-600 border-2 border-white text-white flex items-center justify-center shadow-lg font-bold text-xs">
             <span class="material-symbols-outlined text-[14px]">location_on</span>

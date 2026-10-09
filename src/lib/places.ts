@@ -280,7 +280,7 @@ export async function searchPlacesIndia(query: string): Promise<PlaceResult[]> {
   const matchedCurated = searchCuratedLandmarks(trimmed);
   results.push(...matchedCurated);
 
-  // 2. If MAPPLS_API_KEY is configured, try Mappls Autosuggest API
+  // 2. If MAPPLS_API_KEY is configured, try Mappls Autosuggest API (search.mappls.com)
   const mapplsKey = process.env.MAPPLS_API_KEY;
   if (mapplsKey && mapplsKey.trim() !== '' && mapplsKey !== 'your_mappls_api_key_here') {
     try {
@@ -289,7 +289,7 @@ export async function searchPlacesIndia(query: string): Promise<PlaceResult[]> {
         query: trimmed,
         access_token: mapplsKey.trim(),
       });
-      const autoSuggestUrl = `https://atlas.mappls.com/api/places/search/json?${autoSuggestParams.toString()}`;
+      const autoSuggestUrl = `https://search.mappls.com/search/places/autosuggest/json?${autoSuggestParams.toString()}`;
 
       const res = await fetch(autoSuggestUrl, {
         headers: { Accept: 'application/json' },
@@ -304,28 +304,47 @@ export async function searchPlacesIndia(query: string): Promise<PlaceResult[]> {
           let lat = Number(item.latitude);
           let lng = Number(item.longitude);
 
-          // If coordinates are missing on suggestion, attempt eLoc/geocode resolution
-          if ((isNaN(lat) || isNaN(lng) || lat === 0) && item.eLoc) {
-            try {
-              const elocParams = new URLSearchParams({ access_token: mapplsKey.trim() });
-              const elocUrl = `https://atlas.mappls.com/api/places/eloc/${encodeURIComponent(item.eLoc)}?${elocParams.toString()}`;
-              const elocRes = await fetch(elocUrl, {
-                headers: { Accept: 'application/json' },
-                signal: AbortSignal.timeout(2000),
-              });
-              if (elocRes.ok) {
-                const elocData = await elocRes.json();
-                lat = Number(elocData?.latitude ?? elocData?.lat);
-                lng = Number(elocData?.longitude ?? elocData?.lng);
+          // If coordinates are missing on Mappls suggestion, attempt geocoding resolution
+          if ((isNaN(lat) || isNaN(lng) || lat === 0)) {
+            // Check curated landmarks first
+            const curatedHit = CURATED_INDIAN_LANDMARKS.find(
+              (c) =>
+                c.name.toLowerCase() === (item.placeName || '').toLowerCase() ||
+                (item.eLoc && c.id.includes(item.eLoc.toLowerCase()))
+            );
+            if (curatedHit) {
+              lat = curatedHit.lat;
+              lng = curatedHit.lng;
+            } else {
+              // Try resolving coordinates via Open-Meteo Geocoding
+              try {
+                const geoQuery = [item.placeName, item.placeAddress].filter(Boolean).join(' ');
+                const geoRes = await fetch(
+                  `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
+                    geoQuery
+                  )}&count=1&language=en&format=json`,
+                  { signal: AbortSignal.timeout(2000), headers: { Accept: 'application/json' } }
+                );
+                if (geoRes.ok) {
+                  const geoData = await geoRes.json();
+                  const firstGeo = geoData?.results?.[0];
+                  if (firstGeo) {
+                    lat = Number(firstGeo.latitude);
+                    lng = Number(firstGeo.longitude);
+                  }
+                }
+              } catch {
+                // Resolution failed
               }
-            } catch {
-              // Resolution failed; omit or proceed if fallback exists
             }
           }
 
+          // Only include if coordinates are genuinely resolved inside India
           if (isCoordinatesInIndia(lat, lng)) {
             const name = item.placeName || item.placeAddress || trimmed;
-            const formattedAddress = item.placeAddress || item.placeName || `${trimmed}, India`;
+            const formattedAddress = [item.placeName, item.placeAddress, 'India']
+              .filter(Boolean)
+              .join(', ');
             results.push({
               id: item.eLoc ? `mappls-${item.eLoc}` : `mappls-${lat}-${lng}`,
               name,
@@ -333,7 +352,7 @@ export async function searchPlacesIndia(query: string): Promise<PlaceResult[]> {
               lat,
               lng,
               countryCode: 'IN',
-              state: item.state,
+              state: item.state || item.placeAddress || undefined,
               source: 'mappls',
             });
           }

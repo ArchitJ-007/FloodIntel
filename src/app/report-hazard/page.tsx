@@ -21,19 +21,18 @@ function ReportHazardContent() {
   const paramLng = searchParams.get('lng') ? parseFloat(searchParams.get('lng')!) : null;
   const paramLocation = searchParams.get('location') || null;
 
-  // Form states
-  const [location, setLocation] = useState(
-    paramLocation || '4th Cross Rd & 80ft Road Junction, Koramangala'
+  // Form states (F-33: Clean initial states with no fake prefilled values)
+  const [location, setLocation] = useState(paramLocation || '');
+  const [reportCoords, setReportCoords] = useState<{ lat: number; lng: number } | null>(
+    paramLat !== null && !isNaN(paramLat) && paramLng !== null && !isNaN(paramLng)
+      ? { lat: paramLat, lng: paramLng }
+      : null
   );
-  const [reportCoords, setReportCoords] = useState<{ lat: number; lng: number }>({
-    lat: paramLat !== null && !isNaN(paramLat) ? paramLat : 12.9348,
-    lng: paramLng !== null && !isNaN(paramLng) ? paramLng : 77.6205,
-  });
 
   const [gpsCoordinates, setGpsCoordinates] = useState(
     paramLat !== null && paramLng !== null
       ? `GPS: ${paramLat.toFixed(4)}° N, ${paramLng.toFixed(4)}° E • India`
-      : 'GPS: 12.9348° N, 77.6205° E • Sector 4 Basin'
+      : 'Coordinates not yet acquired. Select a verified location above or use device GPS.'
   );
 
   useEffect(() => {
@@ -47,13 +46,25 @@ function ReportHazardContent() {
   }, [paramLat, paramLng, paramLocation]);
 
   const [hazardType, setHazardType] = useState<HazardCategory>('waterlogging');
-  const [severity, setSeverity] = useState<SeverityType>('high');
+  const [severity, setSeverity] = useState<SeverityType>('moderate');
   const [waterDepth, setWaterDepth] = useState<'curb' | 'knee' | 'deep'>('knee');
-  const [description, setDescription] = useState(
-    'Water is accumulating rapidly near the railway underpass. Sedans are getting stuck. Drainage appears completely clogged.'
-  );
-  const [reporterMode, setReporterMode] = useState<'anonymous' | 'notify'>('notify');
-  const [contact, setContact] = useState('ops.citizen.ward4@floodintel.org');
+  const [description, setDescription] = useState('');
+  const [reporterMode, setReporterMode] = useState<'anonymous' | 'notify'>('anonymous');
+  const [contact, setContact] = useState('');
+
+  // Local photo attachment state (F-12)
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+
+  // Clean up object URL on unmount
+  useEffect(() => {
+    return () => {
+      if (photoPreviewUrl) {
+        URL.revokeObjectURL(photoPreviewUrl);
+      }
+    };
+  }, [photoPreviewUrl]);
 
   // Mini map pin position state
   const [pinPosition, setPinPosition] = useState({ x: 50, y: 50 });
@@ -132,6 +143,12 @@ function ReportHazardContent() {
     setErrors({});
     setGeneralError(null);
     setIsSubmitting(true);
+
+    if (!reportCoords) {
+      setErrors({ coordinates: 'Location coordinates are required. Please search and select a verified address from suggestions or enable device GPS.' });
+      setIsSubmitting(false);
+      return;
+    }
 
     // Derive coordinates relative to selected Indian location
     const lat = Number((reportCoords.lat + (50 - pinPosition.y) * 0.0004).toFixed(5));
@@ -294,9 +311,9 @@ function ReportHazardContent() {
             </div>
           </div>
 
-          {/* Success Banner if submitted */}
+          {/* Success Banner if submitted (PRD F-07: Truthful persistence wording) */}
           {showSuccessToast && createdIncidentId && (
-            <div className="p-4 rounded-xl bg-surface-container-low border border-tertiary-container/50 flex items-start justify-between gap-4 shadow-2xl animate-in fade-in slide-in-from-top-2">
+            <div className="p-4 rounded-xl bg-surface-container-low border border-tertiary-container/50 flex items-start justify-between gap-4 shadow-2xl animate-in fade-in slide-in-from-top-2" role="status" aria-live="polite">
               <div className="flex items-start gap-3">
                 <div className="w-8 h-8 rounded-full bg-tertiary/15 border border-tertiary/30 text-tertiary flex items-center justify-center mt-0.5 shrink-0">
                   <span
@@ -309,23 +326,26 @@ function ReportHazardContent() {
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-tertiary">
-                      Live Incident Created Successfully!
+                      Report Saved on this Device
                     </span>
                     <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-surface-container-highest text-primary">
-                      DISPATCH QUEUED
+                      LOCAL DEVICE PERSISTENCE
                     </span>
                   </div>
                   <p className="text-xs text-on-surface">
                     Report <span className="font-mono font-bold text-primary">{createdIncidentId}</span> has
-                    been registered and added to Sector 4 Triage Queue.
+                    been saved on this browser device. It is unverified and is not shared with other users or remote municipal dispatchers.
                   </p>
                   <div className="flex items-center gap-3 pt-1 text-xs">
-                    <Link href="/risk-map" className="text-primary hover:underline font-semibold">
+                    <Link
+                      href={`/risk-map?lat=${reportCoords?.lat ?? 12.9352}&lng=${reportCoords?.lng ?? 77.6245}&label=${encodeURIComponent(location || 'Reported Incident')}`}
+                      className="text-primary hover:underline font-semibold"
+                    >
                       View on Risk Map →
                     </Link>
                     <span className="text-outline">•</span>
                     <Link href="/officials" className="text-secondary hover:underline font-semibold">
-                      Inspect in Officials Dashboard →
+                      Inspect in Officials Console →
                     </Link>
                   </div>
                 </div>
@@ -379,7 +399,13 @@ function ReportHazardContent() {
                       `GPS: ${place.lat.toFixed(4)}° N, ${place.lng.toFixed(4)}° E • ${place.state || 'India'}`
                     );
                     setReportCoords({ lat: place.lat, lng: place.lng });
-                    setErrors((prev) => ({ ...prev, location: '' }));
+                    setErrors((prev) => ({ ...prev, location: '', coordinates: '' }));
+                    setPossibleDuplicate(null);
+                  }}
+                  onClearOrInvalidate={() => {
+                    setReportCoords(null);
+                    setGpsCoordinates('Coordinates unresolved. Please select a verified suggestion from the search list.');
+                    setPossibleDuplicate(null);
                   }}
                   inputClassName="bg-[#122131] border-[#222F44]"
                 />
@@ -387,6 +413,12 @@ function ReportHazardContent() {
                   <p className="text-xs text-error mt-1 flex items-center gap-1">
                     <span className="material-symbols-outlined text-xs">error</span>
                     <span>{errors.location}</span>
+                  </p>
+                )}
+                {errors.coordinates && (
+                  <p className="text-xs text-error mt-1 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-xs">error</span>
+                    <span>{errors.coordinates}</span>
                   </p>
                 )}
               </div>
@@ -685,14 +717,29 @@ function ReportHazardContent() {
 
               {/* Textarea */}
               <div className="space-y-1.5">
-                <label htmlFor="incident-notes" className="block text-xs font-semibold text-on-surface">
-                  Detailed Observation
-                </label>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="incident-notes" className="block text-xs font-semibold text-on-surface">
+                    Detailed Observation
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDescription('Water is accumulating rapidly near the railway underpass. Sedans are getting stuck. Drainage appears completely clogged.');
+                      setPossibleDuplicate(null);
+                    }}
+                    className="text-[11px] text-primary hover:underline font-mono"
+                  >
+                    + Fill Sample Scenario (Demo)
+                  </button>
+                </div>
                 <textarea
                   id="incident-notes"
                   rows={3}
                   value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  onChange={(e) => {
+                    setDescription(e.target.value);
+                    if (possibleDuplicate) setPossibleDuplicate(null);
+                  }}
                   className="w-full bg-[#122131] border border-[#222F44] rounded-lg p-3 text-xs sm:text-sm text-on-surface placeholder-outline focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary custom-scroll"
                   placeholder="Describe trapped vehicles, overflowing drains, or blockage extent..."
                 />
@@ -834,23 +881,85 @@ function ReportHazardContent() {
                 </div>
               </div>
 
-              {/* Drag and Drop Evidence Upload */}
-              <div className="space-y-1.5">
+              {/* Functional Local Photo Evidence Upload (PRD F-12) */}
+              <div className="space-y-2">
                 <label className="block text-xs font-semibold text-on-surface">
-                  Optional Photo / Evidence Upload
+                  Photo / Visual Evidence (Local Session Only)
                 </label>
-                <label className="border-2 border-dashed border-[#334155] hover:border-primary/60 rounded-xl p-5 bg-[#0d1c2d]/60 flex flex-col items-center justify-center text-center cursor-pointer transition-colors group">
-                  <input type="file" accept="image/*" className="hidden" />
-                  <div className="w-10 h-10 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center text-primary mb-2 group-hover:scale-105 transition-transform">
-                    <span className="material-symbols-outlined text-2xl">photo_camera</span>
+                
+                {photoPreviewUrl ? (
+                  <div className="p-3.5 rounded-xl bg-surface-container border border-outline-variant/60 flex flex-col sm:flex-row items-center gap-4">
+                    <img
+                      src={photoPreviewUrl}
+                      alt="Selected waterlogging evidence"
+                      className="w-24 h-24 object-cover rounded-lg border border-outline-variant shrink-0"
+                    />
+                    <div className="flex-1 space-y-1 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-on-surface truncate max-w-[200px]">
+                          {photoFile?.name}
+                        </span>
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-surface-container-highest text-primary">
+                          {photoFile ? `${(photoFile.size / (1024 * 1024)).toFixed(2)} MB` : ''}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-on-surface-variant">
+                        Stored locally in this browser session. Remote storage service is not configured.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+                          setPhotoFile(null);
+                          setPhotoPreviewUrl(null);
+                        }}
+                        className="text-error hover:underline text-[11px] font-semibold flex items-center gap-1 pt-1"
+                      >
+                        <span className="material-symbols-outlined text-xs">delete</span>
+                        Remove attached photo
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-xs text-on-surface font-medium">
-                    Upload photo of waterlogging <span className="text-on-surface-variant font-normal">(Max 10MB)</span>
+                ) : (
+                  <label className="border-2 border-dashed border-[#334155] hover:border-primary/60 rounded-xl p-5 bg-[#0d1c2d]/60 flex flex-col items-center justify-center text-center cursor-pointer transition-colors group">
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={(e) => {
+                        setPhotoError(null);
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        if (!file.type.startsWith('image/')) {
+                          setPhotoError('Invalid file format. Please upload JPEG, PNG, or WebP image.');
+                          return;
+                        }
+                        if (file.size > 10 * 1024 * 1024) {
+                          setPhotoError(`File exceeds 10MB limit (${(file.size / (1024 * 1024)).toFixed(1)} MB).`);
+                          return;
+                        }
+                        setPhotoFile(file);
+                        setPhotoPreviewUrl(URL.createObjectURL(file));
+                      }}
+                      className="hidden"
+                    />
+                    <div className="w-10 h-10 rounded-full bg-surface-container-highest border border-outline-variant flex items-center justify-center text-primary mb-2 group-hover:scale-105 transition-transform">
+                      <span className="material-symbols-outlined text-2xl">photo_camera</span>
+                    </div>
+                    <p className="text-xs text-on-surface font-medium">
+                      Select photo of waterlogging <span className="text-on-surface-variant font-normal">(Max 10MB)</span>
+                    </p>
+                    <p className="text-[11px] text-outline mt-0.5">
+                      Click to browse or drag file (JPEG, PNG, WebP)
+                    </p>
+                  </label>
+                )}
+
+                {photoError && (
+                  <p className="text-xs text-error mt-1 flex items-center gap-1">
+                    <span className="material-symbols-outlined text-xs">error</span>
+                    <span>{photoError}</span>
                   </p>
-                  <p className="text-[11px] text-outline mt-0.5">
-                    Drag and drop or browse files (JPEG, PNG, HEIC)
-                  </p>
-                </label>
+                )}
               </div>
 
               {/* Reporter Contact */}
@@ -954,10 +1063,11 @@ function ReportHazardContent() {
                   </Link>
                   <button
                     type="button"
+                    disabled={isSubmitting}
                     onClick={() => submitReport(true)}
-                    className="px-3 py-1.5 rounded-lg bg-amber-400 text-black font-bold text-xs hover:bg-amber-300 transition-colors shadow-sm"
+                    className="px-3 py-1.5 rounded-lg bg-amber-400 text-black font-bold text-xs hover:bg-amber-300 transition-colors shadow-sm disabled:opacity-50"
                   >
-                    Submit Distinct Hazard Observation Anyway
+                    {isSubmitting ? 'Submitting...' : 'Submit Distinct Hazard Observation Anyway'}
                   </button>
                 </div>
               </div>

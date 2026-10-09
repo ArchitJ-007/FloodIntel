@@ -108,9 +108,8 @@ export default function InteractiveFloodMap({
 
     setTileError(null);
 
-    const cartoKey =
-      process.env.NEXT_PUBLIC_CARTO_API_KEY || 'cb1_4f0k_1_3dd561391d386020585e0750';
-    const keyParam = cartoKey ? `?key=${cartoKey}` : '';
+    const cartoKey = process.env.NEXT_PUBLIC_CARTO_API_KEY;
+    const keyParam = cartoKey ? `?key=${encodeURIComponent(cartoKey)}` : '';
 
     const tileUrl =
       mapTheme === 'dark'
@@ -120,6 +119,8 @@ export default function InteractiveFloodMap({
     const newTileLayer = L.tileLayer(tileUrl, {
       maxZoom: 19,
       subdomains: 'abcd',
+      attribution:
+        '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener">CARTO</a>',
     });
 
     newTileLayer.on('tileerror', () => {
@@ -133,6 +134,17 @@ export default function InteractiveFloodMap({
     newTileLayer.addTo(map);
     tileLayerRef.current = newTileLayer;
   }, [mapTheme]);
+
+  // Safe HTML escaper for Leaflet DOM interpolation (F-20)
+  const escapeHtml = useCallback((str: string | null | undefined): string => {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }, []);
 
   // Create custom DOM Marker using L.divIcon
   const createIncidentIcon = useCallback(
@@ -154,7 +166,7 @@ export default function InteractiveFloodMap({
         : '';
 
       const isDemo = incident.provenance === 'demo';
-      const scoreBadge = incident.riskScore !== null ? `${incident.riskScore}` : 'N/A';
+      const scoreBadge = incident.riskScore !== null ? `${Number(incident.riskScore)}` : 'N/A';
 
       const iconSymbol = isHigh
         ? 'waves'
@@ -213,18 +225,18 @@ export default function InteractiveFloodMap({
         onSelectIncident(incident.id);
       });
 
-      // Accessible Popup
+      // Accessible, sanitized popup (F-20: prevent HTML injection)
       const popupContent = `
         <div style="font-family: inherit; font-size: 12px; color: #0f172a; min-width: 180px; padding: 2px;">
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-            <strong style="color: #0284c7; font-family: monospace;">${incident.id}</strong>
+            <strong style="color: #0284c7; font-family: monospace;">${escapeHtml(incident.id)}</strong>
             ${incident.provenance === 'demo' ? '<span style="background: #e2e8f0; color: #475569; font-size: 9px; padding: 1px 4px; border-radius: 3px; font-weight: bold;">DEMO DATA</span>' : ''}
           </div>
-          <div style="font-weight: 600; margin-bottom: 3px; line-height: 1.2;">${incident.title}</div>
-          <div style="color: #64748b; font-size: 11px; margin-bottom: 6px;">${incident.location}</div>
+          <div style="font-weight: 600; margin-bottom: 3px; line-height: 1.2;">${escapeHtml(incident.title)}</div>
+          <div style="color: #64748b; font-size: 11px; margin-bottom: 6px;">${escapeHtml(incident.location)}</div>
           <div style="display: flex; justify-content: space-between; border-top: 1px solid #e2e8f0; padding-top: 4px; font-size: 11px;">
-            <span>Depth: <strong>${incident.depth}</strong></span>
-            <span>Risk: <strong>${incident.riskScore !== null ? `${incident.riskScore}/100` : 'Unknown'}</strong></span>
+            <span>Depth: <strong>${escapeHtml(incident.depth)}</strong></span>
+            <span>Risk: <strong>${incident.riskScore !== null ? `${Number(incident.riskScore)}/100` : 'Unknown'}</strong></span>
           </div>
         </div>
       `;
