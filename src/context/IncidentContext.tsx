@@ -69,20 +69,6 @@ export function normalizeSeverity(severity: SeverityType | string): 'minor' | 'm
   }
 }
 
-export function mapRiskCategoryToSeverity(category: RiskCategory): SeverityType {
-  switch (category) {
-    case 'high':
-      return 'high';
-    case 'moderate':
-      return 'moderate';
-    case 'low':
-      return 'low';
-    case 'unknown':
-    default:
-      return 'low';
-  }
-}
-
 interface IncidentContextType {
   incidents: Incident[];
   selectedIncident: Incident | null;

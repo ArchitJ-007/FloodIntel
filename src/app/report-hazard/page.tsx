@@ -1022,17 +1022,25 @@ function ReportHazardContent() {
               </div>
             </section>
 
-            {/* General Server/Validation Error Banner */}
+            {/* General Server/Validation Error Banner (F-24) */}
             {generalError && (
-              <div className="p-3 rounded-lg bg-error/15 border border-error/40 text-xs text-error flex items-center gap-2">
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="p-3 rounded-lg bg-error/15 border border-error/40 text-xs text-error flex items-center gap-2"
+              >
                 <span className="material-symbols-outlined text-sm shrink-0">error</span>
                 <span>{generalError}</span>
               </div>
             )}
 
-            {/* Possible Duplicate Warning Card */}
+            {/* Possible Duplicate Warning Card (F-24) */}
             {possibleDuplicate && (
-              <div className="p-4 rounded-xl bg-amber-500/10 border-2 border-amber-500/40 text-xs space-y-3 animate-in fade-in">
+              <div
+                role="alert"
+                aria-live="polite"
+                className="p-4 rounded-xl bg-amber-500/10 border-2 border-amber-500/40 text-xs space-y-3 animate-in fade-in"
+              >
                 <div className="flex items-start gap-2.5">
                   <span className="material-symbols-outlined text-amber-400 text-xl shrink-0 mt-0.5">
                     warning

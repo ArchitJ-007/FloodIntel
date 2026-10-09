@@ -312,11 +312,13 @@ export default function LandingPage() {
 
             <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-surface-dim/80 via-transparent to-transparent"></div>
 
-            {/* Interactive Pins */}
+            {/* Interactive Pins (Accessible Buttons F-23) */}
             {/* Pin 1: High Risk (#FLD-084) */}
-            <div
+            <button
+              type="button"
+              aria-label="Select critical hazard pin #FLD-084"
               onClick={() => setActivePinId('#FLD-084')}
-              className="absolute top-[42%] left-[44%] -translate-x-1/2 -translate-y-1/2 group cursor-pointer z-20"
+              className="absolute top-[42%] left-[44%] -translate-x-1/2 -translate-y-1/2 group cursor-pointer z-20 focus:outline-none focus-visible:ring-2 focus-visible:ring-error"
             >
               <div className="relative flex items-center justify-center">
                 <span className="animate-ping absolute inline-flex h-8 w-8 rounded-full bg-error opacity-40"></span>
@@ -328,12 +330,14 @@ export default function LandingPage() {
                   <span className="material-symbols-outlined text-sm font-bold">report</span>
                 </div>
               </div>
-            </div>
+            </button>
 
             {/* Pin 2: High Risk (#FLD-071) */}
-            <div
+            <button
+              type="button"
+              aria-label="Select critical hazard pin #FLD-071"
               onClick={() => setActivePinId('#FLD-071')}
-              className="absolute top-[32%] left-[68%] -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group"
+              className="absolute top-[32%] left-[68%] -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group focus:outline-none focus-visible:ring-2 focus-visible:ring-error"
             >
               <div className="relative flex items-center justify-center">
                 <span className="animate-ping absolute inline-flex h-6 w-6 rounded-full bg-error opacity-30"></span>
@@ -345,12 +349,14 @@ export default function LandingPage() {
                   <span className="material-symbols-outlined text-xs">warning</span>
                 </div>
               </div>
-            </div>
+            </button>
 
             {/* Pin 3: Moderate Risk (#FLD-063) */}
-            <div
+            <button
+              type="button"
+              aria-label="Select moderate hazard pin #FLD-063"
               onClick={() => setActivePinId('#FLD-063')}
-              className="absolute top-[65%] left-[30%] -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group"
+              className="absolute top-[65%] left-[30%] -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
             >
               <div
                 className={`w-6 h-6 rounded-full bg-surface-container-lowest border-2 border-amber-400 flex items-center justify-center text-amber-400 shadow-md transition-transform group-hover:scale-110 ${
@@ -359,12 +365,14 @@ export default function LandingPage() {
               >
                 <span className="material-symbols-outlined text-xs">water_loss</span>
               </div>
-            </div>
+            </button>
 
             {/* Pin 4: Unverified (#FLD-091) */}
-            <div
+            <button
+              type="button"
+              aria-label="Select unverified hazard pin #FLD-091"
               onClick={() => setActivePinId('#FLD-091')}
-              className="absolute top-[60%] left-[75%] -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group"
+              className="absolute top-[60%] left-[75%] -translate-x-1/2 -translate-y-1/2 cursor-pointer z-20 group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <div
                 className={`w-6 h-6 rounded-full bg-surface-container-lowest border-2 border-primary flex items-center justify-center text-primary shadow-sm transition-transform group-hover:scale-110 ${
@@ -373,7 +381,7 @@ export default function LandingPage() {
               >
                 <span className="material-symbols-outlined text-[11px]">help</span>
               </div>
-            </div>
+            </button>
 
             {/* Floating Overlay Card (Selected Hazard Callout) */}
             <div className="absolute top-4 left-4 max-w-sm w-[calc(100%-2rem)] sm:w-80 bg-surface-container-low/95 backdrop-blur-md border border-outline-variant rounded-xl p-4 shadow-2xl z-30">

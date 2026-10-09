@@ -270,6 +270,9 @@ function RiskMapContent() {
                 >
                   Rain Risk: {weather.rainRiskCategory}
                 </span>
+                <span className="text-[10px] text-outline font-mono hidden sm:inline" title={`Provider timestamp: ${weather.providerTimestamp}`}>
+                  {weather.isStale ? 'Stale observation' : `Observed: ${weather.providerTimestamp ? weather.providerTimestamp.slice(11, 16) : 'Live'}`}
+                </span>
                 {weather.isStale && (
                   <span className="text-[10px] text-amber-400 font-mono px-1 rounded bg-amber-500/10 border border-amber-500/30">
                     Stale
