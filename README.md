@@ -5,6 +5,9 @@
 
 ---
 
+**FloodIntel** - An IEEE Synapse Hackathon Prototype Made By Our Team  
+Our Team Was Ranked **29** Out Of **57 Teams** For our Project
+
 ## 📌 Executive Summary
 
 **FloodIntel** is a real-time flood monitoring, deterministic hazard scoring, and safe navigation platform engineered for citizens, municipal emergency responders, and urban commuters. By fusing open hydrologic weather telemetry, road network routing, citizen incident crowdsourcing, and explainable AI, FloodIntel bridges the critical gap between raw meteorological data and street-level travel decisions.

@@ -427,3 +427,100 @@ export async function searchPlacesIndia(query: string): Promise<PlaceResult[]> {
 
   return dedupedResults;
 }
+
+/**
+ * Reverse geocodes genuine map coordinates into a human-readable Indian address
+ * using the Mappls reverse-geocode REST service. Runs server-side only so the
+ * MAPPLS_API_KEY is never exposed to the browser.
+ *
+ * Returns null when the service is unavailable or unconfigured — callers must
+ * handle the fallback and must not fabricate an address.
+ */
+export interface ReverseGeocodeResult {
+  name: string;
+  formattedAddress: string;
+  lat: number;
+  lng: number;
+  state?: string;
+  city?: string;
+  district?: string;
+  pincode?: string;
+  source: 'mappls';
+}
+
+export async function reverseGeocodeIndia(
+  lat: number,
+  lng: number
+): Promise<ReverseGeocodeResult | null> {
+  if (
+    typeof lat !== 'number' ||
+    typeof lng !== 'number' ||
+    isNaN(lat) ||
+    isNaN(lng) ||
+    lat < -90 ||
+    lat > 90 ||
+    lng < -180 ||
+    lng > 180
+  ) {
+    return null;
+  }
+
+  const mapplsKey = process.env.MAPPLS_API_KEY;
+  if (!mapplsKey || mapplsKey.trim() === '' || mapplsKey === 'your_mappls_api_key_here') {
+    return null;
+  }
+
+  try {
+    const params = new URLSearchParams({
+      lat: String(lat),
+      lng: String(lng),
+      access_token: mapplsKey.trim(),
+    });
+
+    const res = await fetch(`https://search.mappls.com/search/address/rev-geocode?${params.toString()}`, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(4000),
+    });
+
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    const first = Array.isArray(data?.results) ? data.results[0] : null;
+    if (!first) return null;
+
+    const street = String(first.street || '').trim();
+    const subLocality = String(first.subLocality || '').trim();
+    const locality = String(first.locality || '').trim();
+    const city = String(first.city || '').trim();
+    const state = String(first.state || '').trim();
+    const district = String(first.district || '').trim();
+    const pincode = String(first.pincode || '').trim();
+    const formatted = String(first.formatted_address || '').trim();
+
+    const name =
+      [subLocality, street].filter(Boolean).join(', ') ||
+      locality ||
+      city ||
+      formatted ||
+      `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+
+    const formattedAddress =
+      formatted ||
+      Array.from(new Set([name, city, state, 'India'].filter(Boolean))).join(', ');
+
+    return {
+      name,
+      formattedAddress,
+      lat,
+      lng,
+      state: state || undefined,
+      city: city || undefined,
+      district: district || undefined,
+      pincode: pincode || undefined,
+      source: 'mappls',
+    };
+  } catch {
+    // Reverse geocoding is best-effort; callers fall back to coordinate text.
+    return null;
+  }
+}

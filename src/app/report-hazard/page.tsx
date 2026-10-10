@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { TopNavBar } from '@/components/TopNavBar';
@@ -12,6 +12,14 @@ import {
   DuplicateMatchInfo,
 } from '@/lib/reportingValidation';
 import { LocationSearchBox } from '@/components/LocationSearchBox';
+import MapplsInteractiveMap, {
+  isValidLatLng,
+  type MapplsLatLng,
+} from '@/components/MapplsInteractiveMap';
+
+// Default map viewport (demo corridor used by the seeded incident records) shown before
+// the reporter selects a location. This is only a viewport — it is never submitted as a report coordinate.
+const DEFAULT_REPORT_CENTER: MapplsLatLng = { lat: 12.9352, lng: 77.6245 };
 
 function ReportHazardContent() {
   const { addHazard, incidents } = useIncidents();
@@ -66,8 +74,85 @@ function ReportHazardContent() {
     };
   }, [photoPreviewUrl]);
 
-  // Mini map pin position state
-  const [pinPosition, setPinPosition] = useState({ x: 50, y: 50 });
+  // -------------------------------------------------------------------------
+  // Real Mappls map state.
+  // `reportCoords` is the authoritative report coordinate, sourced ONLY from
+  // genuine Mappls SDK map clicks, verified search results, or device GPS.
+  // Recentering is explicit (search/GPS/recenter control) and never happens as
+  // a side effect of the user panning or clicking the map.
+  // -------------------------------------------------------------------------
+  const [mapView, setMapView] = useState<{ center: MapplsLatLng; zoom: number; recenterKey: number }>(() => ({
+    center:
+      paramLat !== null && paramLng !== null && !isNaN(paramLat) && !isNaN(paramLng)
+        ? { lat: paramLat, lng: paramLng }
+        : DEFAULT_REPORT_CENTER,
+    zoom: 14,
+    recenterKey: 0,
+  }));
+
+  // Reverse-geocoding status for the currently picked map coordinate.
+  const [locationResolution, setLocationResolution] = useState<
+    'idle' | 'resolving' | 'resolved' | 'unavailable'
+  >('idle');
+  const reverseGeocodeAbortRef = useRef<AbortController | null>(null);
+
+  const focusReportMap = (coords: MapplsLatLng, zoom = 16) => {
+    setMapView((prev) => ({ center: coords, zoom, recenterKey: prev.recenterKey + 1 }));
+  };
+
+  /**
+   * Best-effort reverse geocoding of genuinely picked coordinates so the location
+   * text and the coordinate pin stay consistent. If the service is unavailable the
+   * coordinate text is kept — no address is ever invented.
+   */
+  const resolveLocationFromCoords = async (coords: MapplsLatLng) => {
+    reverseGeocodeAbortRef.current?.abort();
+    const controller = new AbortController();
+    reverseGeocodeAbortRef.current = controller;
+    setLocationResolution('resolving');
+
+    try {
+      const res = await fetch(`/api/places/reverse?lat=${coords.lat}&lng=${coords.lng}`, {
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error('Reverse geocoding request failed');
+      const data = await res.json();
+      if (controller.signal.aborted) return;
+
+      const formattedAddress: string | undefined = data?.result?.formattedAddress;
+      if (formattedAddress) {
+        setLocation(formattedAddress);
+        setLocationResolution('resolved');
+      } else {
+        setLocation(`Map pin at ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`);
+        setLocationResolution('unavailable');
+      }
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return;
+      setLocation(`Map pin at ${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`);
+      setLocationResolution('unavailable');
+    }
+  };
+
+  /**
+   * Applies coordinates reported by the Mappls SDK click/tap event to the report form.
+   * Never derives latitude/longitude from screen, CSS or percentage positions.
+   */
+  const handleMapClick = (coords: MapplsLatLng) => {
+    if (!isValidLatLng(coords)) return;
+    setReportCoords({ lat: coords.lat, lng: coords.lng });
+    setGpsCoordinates(
+      `GPS: ${coords.lat.toFixed(5)}° N, ${coords.lng.toFixed(5)}° E • Selected on Mappls map`
+    );
+    setErrors((prev) => ({ ...prev, coordinates: '', location: '' }));
+    setPossibleDuplicate(null);
+    void resolveLocationFromCoords(coords);
+  };
+
+  // Abort any in-flight reverse geocode when the reporter leaves the page.
+  useEffect(() => {
+    return () => reverseGeocodeAbortRef.current?.abort();
+  }, []);
 
   // AI Incident Classification state
   const [aiClassification, setAiClassification] = useState<any | null>(null);
@@ -139,6 +224,15 @@ function ReportHazardContent() {
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [possibleDuplicate, setPossibleDuplicate] = useState<DuplicateMatchInfo | null>(null);
 
+  // Ref to the submission confirmation so it can be brought into view on success
+  const successBannerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (showSuccessToast) {
+      successBannerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [showSuccessToast]);
+
   const submitReport = async (overrideDuplicate = false) => {
     setErrors({});
     setGeneralError(null);
@@ -150,9 +244,10 @@ function ReportHazardContent() {
       return;
     }
 
-    // Derive coordinates relative to selected Indian location
-    const lat = Number((reportCoords.lat + (50 - pinPosition.y) * 0.0004).toFixed(5));
-    const lng = Number((reportCoords.lng + (pinPosition.x - 50) * 0.0004).toFixed(5));
+    // Authoritative coordinates: exactly the genuine latitude/longitude obtained from
+    // the Mappls map click event, a verified search result, or device GPS.
+    const lat = Number(reportCoords.lat.toFixed(5));
+    const lng = Number(reportCoords.lng.toFixed(5));
 
     // 1. Client-Side Validation
     const clientValidation = validateHazardReport({
@@ -234,21 +329,29 @@ function ReportHazardContent() {
     }
 
     // 4. Register Incident in IncidentContext
-    const incident = addHazard({
-      location: clientValidation.sanitized!.location,
-      hazardType,
-      severity,
-      waterDepth,
-      description: clientValidation.sanitized!.description,
-      reporterMode,
-      contact: reporterMode === 'notify' ? contact : undefined,
-      coordinates: { lat, lng },
-    });
+    try {
+      const incident = addHazard({
+        location: clientValidation.sanitized!.location,
+        hazardType,
+        severity,
+        waterDepth,
+        description: clientValidation.sanitized!.description,
+        reporterMode,
+        contact: reporterMode === 'notify' ? contact : undefined,
+        coordinates: { lat, lng },
+      });
 
-    setCreatedIncidentId(incident.id);
-    setPossibleDuplicate(null);
-    setIsSubmitting(false);
-    setShowSuccessToast(true);
+      setCreatedIncidentId(incident.id);
+      setPossibleDuplicate(null);
+      setShowSuccessToast(true);
+    } catch (err) {
+      console.error('Failed to register hazard report:', err);
+      setGeneralError(
+        'Hazard could not be reported. Please verify the selected location and try again.'
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -260,11 +363,16 @@ function ReportHazardContent() {
     if (navigator?.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          const latVal = Number(pos.coords.latitude.toFixed(4));
-          const lngVal = Number(pos.coords.longitude.toFixed(4));
+          const latVal = Number(pos.coords.latitude.toFixed(5));
+          const lngVal = Number(pos.coords.longitude.toFixed(5));
           setReportCoords({ lat: latVal, lng: lngVal });
           setGpsCoordinates(`GPS: ${latVal}° N, ${lngVal}° E • Acquired via Device GPS`);
           setLocation(`Device GPS Acquired Location (${latVal}, ${lngVal})`);
+          setErrors((prev) => ({ ...prev, coordinates: '', location: '' }));
+          setPossibleDuplicate(null);
+          setLocationResolution('idle');
+          // Center the real map on the acquired GPS position.
+          focusReportMap({ lat: latVal, lng: lngVal });
         },
         () => {
           setGpsCoordinates('GPS acquisition unavailable. Please use the location search bar above.');
@@ -313,7 +421,7 @@ function ReportHazardContent() {
 
           {/* Success Banner if submitted (PRD F-07: Truthful persistence wording) */}
           {showSuccessToast && createdIncidentId && (
-            <div className="p-4 rounded-xl bg-surface-container-low border border-tertiary-container/50 flex items-start justify-between gap-4 shadow-2xl animate-in fade-in slide-in-from-top-2" role="status" aria-live="polite">
+            <div ref={successBannerRef} className="p-4 rounded-xl bg-surface-container-low border border-tertiary-container/50 flex items-start justify-between gap-4 shadow-2xl animate-in fade-in slide-in-from-top-2" role="status" aria-live="polite">
               <div className="flex items-start gap-3">
                 <div className="w-8 h-8 rounded-full bg-tertiary/15 border border-tertiary/30 text-tertiary flex items-center justify-center mt-0.5 shrink-0">
                   <span
@@ -326,7 +434,7 @@ function ReportHazardContent() {
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold text-tertiary">
-                      Report Saved on this Device
+                      Hazard Reported Successfully
                     </span>
                     <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-surface-container-highest text-primary">
                       LOCAL DEVICE PERSISTENCE
@@ -401,11 +509,15 @@ function ReportHazardContent() {
                     setReportCoords({ lat: place.lat, lng: place.lng });
                     setErrors((prev) => ({ ...prev, location: '', coordinates: '' }));
                     setPossibleDuplicate(null);
+                    setLocationResolution('resolved');
+                    // Center the real Mappls map on the selected search result.
+                    focusReportMap({ lat: place.lat, lng: place.lng });
                   }}
                   onClearOrInvalidate={() => {
                     setReportCoords(null);
                     setGpsCoordinates('Coordinates unresolved. Please select a verified suggestion from the search list.');
                     setPossibleDuplicate(null);
+                    setLocationResolution('idle');
                   }}
                   inputClassName="bg-[#122131] border-[#222F44]"
                 />
@@ -423,88 +535,38 @@ function ReportHazardContent() {
                 )}
               </div>
 
-              {/* Mini Interactive Map Pin Selector Container */}
+              {/* Real Mappls interactive map — click/tap to set genuine report coordinates */}
               <div className="relative rounded-lg overflow-hidden border border-[#222F44] bg-[#051424]">
-                <div
-                  className="relative h-64 w-full cursor-crosshair"
-                  onClick={(e) => {
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = ((e.clientX - rect.left) / rect.width) * 100;
-                    const y = ((e.clientY - rect.top) / rect.height) * 100;
-                    setPinPosition({ x, y });
-                  }}
-                >
-                  {/* SVG Map Tile Simulation */}
-                  <svg
-                    className="w-full h-full opacity-80"
-                    preserveAspectRatio="none"
-                    viewBox="0 0 800 300"
+                <MapplsInteractiveMap
+                  center={mapView.center}
+                  zoom={mapView.zoom}
+                  recenterKey={mapView.recenterKey}
+                  selectedMarker={reportCoords}
+                  onMapClick={handleMapClick}
+                  heightClassName="h-72"
+                  ariaLabel="Mappls map — click to select the hazard location"
+                />
+
+                {/* Map floating controls */}
+                <div className="absolute top-3 right-3 z-20 flex flex-col gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      reportCoords
+                        ? focusReportMap(reportCoords, mapView.zoom)
+                        : setMapView((prev) => ({ ...prev, recenterKey: prev.recenterKey + 1 }))
+                    }
+                    className="w-7 h-7 rounded bg-[#1E293B] border border-[#334155] text-on-surface hover:text-primary flex items-center justify-center shadow"
+                    title="Recenter map on the selected coordinate"
                   >
-                    <defs>
-                      <pattern id="mini-map-grid" width="30" height="30" patternUnits="userSpaceOnUse">
-                        <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#122131" strokeWidth="0.8" />
-                      </pattern>
-                    </defs>
-                    <rect width="800" height="300" fill="#07121f" />
-                    <rect width="800" height="300" fill="url(#mini-map-grid)" />
-                    {/* Canal */}
-                    <path
-                      d="M 0 160 C 200 130, 400 220, 800 180"
-                      fill="none"
-                      stroke="#0f3c5f"
-                      strokeWidth="28"
-                    />
-                    {/* Road Network */}
-                    <line x1="0" y1="80" x2="800" y2="80" stroke="#1f2f45" strokeWidth="4" />
-                    <line x1="0" y1="220" x2="800" y2="220" stroke="#1f2f45" strokeWidth="4" />
-                    <line x1="280" y1="0" x2="280" y2="300" stroke="#1f2f45" strokeWidth="4" />
-                    <line x1="520" y1="0" x2="520" y2="300" stroke="#1f2f45" strokeWidth="4" />
-                    <path d="M 120 0 L 680 300" stroke="#253a54" strokeWidth="3" />
-                  </svg>
+                    <span className="material-symbols-outlined text-sm">my_location</span>
+                  </button>
+                </div>
 
-                  {/* Overlay Gradient */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#151E2E] via-transparent to-transparent opacity-80 pointer-events-none"></div>
-
-                  {/* Interactive Pin Marker */}
-                  <div
-                    className="absolute -translate-x-1/2 -translate-y-full flex flex-col items-center pointer-events-none transition-all duration-200"
-                    style={{ left: `${pinPosition.x}%`, top: `${pinPosition.y}%` }}
-                  >
-                    <div className="animate-bounce">
-                      <div className="relative flex items-center justify-center">
-                        <span className="absolute w-8 h-8 rounded-full bg-error/30 animate-ping"></span>
-                        <span
-                          className="material-symbols-outlined text-[32px] text-error drop-shadow-md"
-                          style={{ fontVariationSettings: "'FILL' 1" }}
-                        >
-                          location_pin
-                        </span>
-                      </div>
-                    </div>
-                    <div className="bg-[#1E293B] border border-[#334155] px-2 py-0.5 rounded text-[10px] font-semibold text-on-surface shadow-lg mt-0.5 whitespace-nowrap">
-                      Pinned Coordinate
-                    </div>
-                  </div>
-
-                  {/* Map Floating Controls */}
-                  <div className="absolute top-3 right-3 flex flex-col gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setPinPosition({ x: 50, y: 50 })}
-                      className="w-7 h-7 rounded bg-[#1E293B] border border-[#334155] text-on-surface hover:text-primary flex items-center justify-center shadow"
-                      title="Center Pin"
-                    >
-                      <span className="material-symbols-outlined text-sm">my_location</span>
-                    </button>
-                  </div>
-
-                  {/* Click precision hint */}
-                  <div className="absolute bottom-3 left-3 bg-[#151E2E]/90 backdrop-blur-sm border border-[#222F44] px-2.5 py-1 rounded-md text-[11px] text-on-surface-variant flex items-center gap-1.5">
-                    <span className="material-symbols-outlined text-sm text-secondary">
-                      touch_app
-                    </span>
-                    <span>Click anywhere on canvas to reposition coordinate pin</span>
-                  </div>
+                {/* Selection hint */}
+                <div className="absolute bottom-3 left-3 z-20 bg-[#151E2E]/90 backdrop-blur-sm border border-[#222F44] px-2.5 py-1 rounded-md text-[11px] text-on-surface-variant flex items-center gap-1.5 pointer-events-none">
+                  <span className="material-symbols-outlined text-sm text-secondary">touch_app</span>
+                  <span>Click or tap the map to set the exact hazard coordinate</span>
                 </div>
 
                 {/* Coordinate Info & GPS trigger Footer */}
@@ -516,9 +578,22 @@ function ReportHazardContent() {
                     >
                       pin_drop
                     </span>
-                    <div>
-                      <div className="text-xs text-on-surface font-semibold">{location}</div>
+                    <div className="min-w-0">
+                      <div className="text-xs text-on-surface font-semibold truncate">
+                        {location || 'No location selected yet'}
+                      </div>
                       <div className="text-[11px] text-outline font-mono">{gpsCoordinates}</div>
+                      {locationResolution === 'resolving' && (
+                        <div className="text-[10px] text-secondary flex items-center gap-1">
+                          <span className="material-symbols-outlined text-xs animate-spin">sync</span>
+                          <span>Resolving address for the selected map point…</span>
+                        </div>
+                      )}
+                      {locationResolution === 'unavailable' && reportCoords && (
+                        <div className="text-[10px] text-outline">
+                          Address lookup unavailable — coordinate pin retained.
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -526,7 +601,7 @@ function ReportHazardContent() {
                   <button
                     type="button"
                     onClick={handleUseGps}
-                    className="inline-flex items-center justify-center gap-1.5 bg-transparent border border-[#222F44] text-on-surface hover:bg-[#1E293B] hover:border-[#334155] px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
+                    className="inline-flex items-center justify-center gap-1.5 bg-transparent border border-[#222F44] text-on-surface hover:bg-[#1E293B] hover:border-[#334155] px-3 py-1.5 rounded-md text-xs font-medium transition-colors shrink-0"
                   >
                     <span className="material-symbols-outlined text-sm text-secondary">near_me</span>
                     <span>Use Current GPS Location</span>
@@ -1083,15 +1158,34 @@ function ReportHazardContent() {
 
             {/* ================= SUBMISSION FOOTER ================= */}
             <div className="pt-4 border-t border-[#222F44] flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-center gap-2 text-tertiary text-xs font-medium">
-                <span
-                  className="material-symbols-outlined text-base"
-                  style={{ fontVariationSettings: "'FILL' 1" }}
+              {showSuccessToast && createdIncidentId ? (
+                <div
+                  className="flex items-center gap-2 text-tertiary text-xs font-semibold"
+                  role="status"
+                  aria-live="polite"
                 >
-                  check_circle
-                </span>
-                <span>Citizen report is verified client-side before dispatch ingestion.</span>
-              </div>
+                  <span
+                    className="material-symbols-outlined text-base"
+                    style={{ fontVariationSettings: "'FILL' 1" }}
+                  >
+                    check_circle
+                  </span>
+                  <span>
+                    Hazard Reported Successfully —{' '}
+                    <span className="font-mono text-primary">{createdIncidentId}</span>
+                  </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-tertiary text-xs font-medium">
+                  <span
+                    className="material-symbols-outlined text-base"
+                    style={{ fontVariationSettings: "'FILL' 1" }}
+                  >
+                    check_circle
+                  </span>
+                  <span>Citizen report is verified client-side before dispatch ingestion.</span>
+                </div>
+              )}
 
               <div className="flex items-center gap-3 w-full sm:w-auto">
                 <Link
